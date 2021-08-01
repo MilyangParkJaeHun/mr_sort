@@ -4,5 +4,8 @@
 # ignore all .txt files
 *.txt
 
+# but do track CMakeLists.txt, even though you're ignoring .txt files above
+!CMakeLists.txt
+
 # ignore python cache file
 __pycache__
