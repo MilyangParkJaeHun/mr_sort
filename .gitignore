@@ -1,5 +1,8 @@
 # ignore all .jpg files
 *.jpg
 
+# ignore all .txt files
+*.txt
+
 # ignore python cache file
 __pycache__
