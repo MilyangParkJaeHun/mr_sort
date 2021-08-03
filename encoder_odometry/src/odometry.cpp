@@ -5,6 +5,7 @@
 
 #include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/Float32.h>
 #include <geometry_msgs/Vector3.h>
 #include <tf/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
@@ -16,11 +17,12 @@
 #define WheelTrack 0.108   // units : m, Distance between the two wheels
 #define EncoderCountsPerWheel 374
 #define WheelRadius 0.035  // units : m, Mobile robot wheel size
-#define Decoding 2
+#define Decoding 1
 #define DistancePerCount (TwoPI * WheelRadius) / (EncoderCountsPerWheel * Decoding)
 
-long previous_left_encoder_counts = 0;
-long previous_right_encoder_counts = 0;
+void WheelCallback(const geometry_msgs::Vector3::ConstPtr& ticks);
+double rad2deg(double radian);
+
 ros::Time current_time, last_time;
 
 struct Odom {
@@ -42,12 +44,14 @@ double delta_y;         // corresponding change in y direction
 double delta_th;        // corresponding change in heading
 double dt;
 
-
+// Get encoder ticks from motor_node.
+// Ticks are initialized and sent at every point in the motor node.
+// That is, it does not accumulate.
 void WheelCallback(const geometry_msgs::Vector3::ConstPtr& ticks) {
     current_time = ros::Time::now();
 
-    delta_left = ticks->x - previous_left_encoder_counts;
-    delta_right = ticks->y - previous_right_encoder_counts;
+    delta_left = ticks->x;
+    delta_right = ticks->y;
     dt = (current_time - last_time).toSec();
 
     v_left = delta_left * DistancePerCount / dt;
@@ -63,10 +67,19 @@ void WheelCallback(const geometry_msgs::Vector3::ConstPtr& ticks) {
     odom.y  += delta_y;
     odom.th += delta_th;
 
-    previous_left_encoder_counts    = ticks->x;
-    previous_right_encoder_counts   = ticks->y;
-
     last_time = current_time;
+}
+
+double rad2deg(double radian) {
+    while(radian < 0) {
+        radian += TwoPI;
+    }
+
+    while(radian > TwoPI) {
+        radian -= TwoPI;
+    }
+
+    return radian * 180 / PI;
 }
 
 int main(int argc, char **argv) {
@@ -75,6 +88,7 @@ int main(int argc, char **argv) {
 
     ros::Subscriber motor_encoder_sub = nh.subscribe("/motor_encoder", 10, WheelCallback);
     ros::Publisher odom_pub = nh.advertise<nav_msgs::Odometry>("/odometry", 50);
+    ros::Publisher th_pub = nh.advertise<std_msgs::Float32>("/theta", 10);
     tf::TransformBroadcaster odom_broadcaster;
 
     ros::Rate loop_rate(10);
@@ -123,6 +137,10 @@ int main(int argc, char **argv) {
                                                             (0)   (0)   (0)  (0)  (0)  (1e3) ; 
 
         odom_pub.publish(odom_msgs);
+
+        std_msgs::Float32 th_msgs;
+        th_msgs.data = rad2deg(odom.th);
+        th_pub.publish(th_msgs);
 
         ros::spinOnce();
         loop_rate.sleep();
