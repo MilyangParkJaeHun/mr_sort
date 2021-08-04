@@ -84,7 +84,7 @@ class Detector(object):
 
 def parse_args():
     """Parse input arguments."""
-    parser = argparse.ArgumentParser(description='SORT demo')
+    parser = argparse.ArgumentParser(description='Object Detection demo')
     parser.add_argument('--model_path', help='Path to object detection model weight file', type=str, default='IR/Yolo/coco')
     parser.add_argument('--img_path', help='Path to input images.', type=str, default='../mot_benchmark')
     parser.add_argument('--device', help='Device for inference', type=str, default='GPU')
