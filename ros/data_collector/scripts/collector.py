@@ -14,15 +14,18 @@ import time
 import os
 import sys
 
+seq = 'test'
+
 start_flag = False
 stop_flag = False
 
 class Collector:
     def __init__(self):
+        global seq
         rospack = rospkg.RosPack()
         pack_path = rospack.get_path('data_collector')
 
-        self.output_path = os.path.join(pack_path, 'scripts', 'output')
+        self.output_path = os.path.join(pack_path, 'scripts', 'output', seq)
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
