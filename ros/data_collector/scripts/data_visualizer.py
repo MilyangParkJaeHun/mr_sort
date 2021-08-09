@@ -20,6 +20,13 @@ green = (0, 255, 0)
 blue = (255, 0, 0)
 PI = 3.14159265
 
+def rad2deg(rad):
+    while rad > PI:
+        rad -= PI
+    while rad < -PI:
+        rad += PI
+    return rad/PI*180
+
 if __name__ == "__main__":
     args = parse_args()
 
@@ -63,7 +70,7 @@ if __name__ == "__main__":
                 height = frame.shape[0]
 
                 frame = cv2.line(frame, (int(width/2), int(height*0.9)), (int(width/2), int(height*0.9)), blue, 5)
-                arrow_end = (int(width/2 - (gap_theta/PI)*width/2), int(height*0.9))
+                arrow_end = (int(width/2 - 10*(gap_theta/PI)*width/2), int(height*0.9))
                 if arrow_end[0] < 0:
                     arrow_end = list(arrow_end)
                     arrow_end[0] = 1
@@ -77,7 +84,9 @@ if __name__ == "__main__":
                     arrow_color = green
                 else:
                     arrow_color = red
+
                 frame = cv2.arrowedLine(frame, (int(width/2), int(height*0.9)), arrow_end, arrow_color, 5)
+                frame = cv2.putText(frame, 'degree : %.2f'%(rad2deg(gap_theta)),(30, int(height*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, blue, 2, cv2.LINE_AA)
 
                 cv2.imwrite(os.path.join(out_img_dir, img_fn), frame)
                 if display:
