@@ -52,6 +52,7 @@ if __name__ == "__main__":
         bbox_list = []
         with open(os.path.join(gt_fn, 'gt.txt'), 'w') as out_file:
             for fiji_fn in os.listdir(fiji_dir):
+                print(os.path.join(fiji_dir, fiji_fn))
                 with open(os.path.join(fiji_dir, fiji_fn), 'r') as in_file:
                     frame_id = int(fiji_fn.split('.')[0])
 

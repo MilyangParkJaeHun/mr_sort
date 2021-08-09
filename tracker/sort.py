@@ -102,8 +102,17 @@ class KalmanBoxTracker(object):
     """
     #define constant velocity model
     self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.F = np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
-    self.kf.H = np.array([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
+    self.kf.F = np.array([[1,0,0,0,1,0,0],
+                          [0,1,0,0,0,1,0],
+                          [0,0,1,0,0,0,1],
+                          [0,0,0,1,0,0,0],
+                          [0,0,0,0,1,0,0],
+                          [0,0,0,0,0,1,0],
+                          [0,0,0,0,0,0,1]])
+    self.kf.H = np.array([[1,0,0,0,0,0,0], 
+                          [0,1,0,0,0,0,0],
+                          [0,0,1,0,0,0,0],
+                          [0,0,0,1,0,0,0]])
 
     self.kf.R[2:,2:] *= 10.
     self.kf.P[4:,4:] *= 1000. #give high uncertainty to the unobservable initial velocities
@@ -165,7 +174,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
   if min(iou_matrix.shape) > 0:
     a = (iou_matrix > iou_threshold).astype(np.int32)
     if a.sum(1).max() == 1 and a.sum(0).max() == 1:
-        matched_indices = np.stack(np.where(a), axis=1)
+      matched_indices = np.stack(np.where(a), axis=1)
     else:
       matched_indices = linear_assignment(-iou_matrix)
   else:
