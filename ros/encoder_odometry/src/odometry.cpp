@@ -87,11 +87,11 @@ int main(int argc, char **argv) {
     ros::NodeHandle nh;
 
     ros::Subscriber motor_encoder_sub = nh.subscribe("/motor_encoder", 10, WheelCallback);
-    ros::Publisher odom_pub = nh.advertise<nav_msgs::Odometry>("/odometry", 50);
+    ros::Publisher odom_pub = nh.advertise<nav_msgs::Odometry>("/odometry", 10);
     ros::Publisher th_pub = nh.advertise<std_msgs::Float32>("/theta", 10);
     tf::TransformBroadcaster odom_broadcaster;
 
-    ros::Rate loop_rate(20);
+    ros::Rate loop_rate(60);
 
     last_time = ros::Time::now();
 
