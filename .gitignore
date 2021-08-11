@@ -4,6 +4,9 @@
 # ignore all .txt files
 *.txt
 
+# ignore output/ directory
+output/
+
 # but do track CMakeLists.txt, even though you're ignoring .txt files above
 !CMakeLists.txt
 
