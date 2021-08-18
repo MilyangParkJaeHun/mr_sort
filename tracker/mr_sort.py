@@ -18,6 +18,8 @@
 from __future__ import print_function
 
 import os
+import cv2
+import math
 import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
@@ -33,12 +35,16 @@ from kalman import KalmanFilter
 
 np.random.seed(0)
 
+fov = 140 # camera's field of view 
+PI = 3.14159265
+img_width = 640
+img_height = 480
 
-# def polar_to_orthogonal(r, theta):
-    
+def degree_to_rad(degree):
+  return degree / 180 * PI
 
-# def orthogonal_to_pola ():
-
+def rad_to_degree(rad):
+  return rad / PI * 180
 
 def linear_assignment(cost_matrix):
   try:
@@ -66,8 +72,7 @@ def iou_batch(bb_test, bb_gt):
   wh = w * h
   o = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])                                      
     + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)                                              
-  return(o)  
-
+  return(o)
 
 def convert_bbox_to_z(bbox):
   """
@@ -83,7 +88,6 @@ def convert_bbox_to_z(bbox):
   r = w / float(h)
   return np.array([x, y, s, r]).reshape((4, 1))
 
-
 def convert_x_to_bbox(x,score=None):
   """
   Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
@@ -95,74 +99,6 @@ def convert_x_to_bbox(x,score=None):
     return np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape((1,4))
   else:
     return np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score]).reshape((1,5))
-
-class KalmanPolarBoxTracker(object):
-  """
-  This class represents the internal state of individual tracked objects observed as bbox.
-  """
-  count = 0
-  def __init__(self,bbox):
-    """
-    Initialises a tracker using initial bounding box.
-    """
-    #define constant velocity model
-    self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.F = np.array([[1,0,0,0,1,0,0],
-                          [0,1,0,0,0,1,0],
-                          [0,0,1,0,0,0,1],
-                          [0,0,0,1,0,0,0],
-                          [0,0,0,0,1,0,0],
-                          [0,0,0,0,0,1,0],
-                          [0,0,0,0,0,0,1]])
-    self.kf.H = np.array([[1,0,0,0,0,0,0], 
-                          [0,1,0,0,0,0,0],
-                          [0,0,1,0,0,0,0],
-                          [0,0,0,1,0,0,0]])
-
-    self.kf.R[2:,2:] *= 10.
-    self.kf.P[4:,4:] *= 1000. #give high uncertainty to the unobservable initial velocities
-    self.kf.P *= 10.
-    self.kf.Q[-1,-1] *= 0.01
-    self.kf.Q[4:,4:] *= 0.01
-
-    self.kf.x[:4] = convert_bbox_to_z(bbox)
-    self.time_since_update = 0
-    self.id = KalmanBoxTracker.count
-    KalmanBoxTracker.count += 1
-    self.history = []
-    self.hits = 0
-    self.hit_streak = 0
-    self.age = 0
-
-  def update(self,bbox):
-    """
-    Updates the state vector with observed bbox.
-    """
-    self.time_since_update = 0
-    self.history = []
-    self.hits += 1
-    self.hit_streak += 1
-    self.kf.update(convert_bbox_to_z(bbox))
-
-  def predict(self):
-    """
-    Advances the state vector and returns the predicted bounding box estimate.
-    """
-    if((self.kf.x[6]+self.kf.x[2])<=0):
-      self.kf.x[6] *= 0.0
-    self.kf.predict()
-    self.age += 1
-    if(self.time_since_update>0):
-      self.hit_streak = 0
-    self.time_since_update += 1
-    self.history.append(convert_x_to_bbox(self.kf.x))
-    return self.history[-1]
-
-  def get_state(self):
-    """
-    Returns the current bounding box estimate.
-    """
-    return convert_x_to_bbox(self.kf.x)
 
 class KalmanBoxTracker(object):
   """
@@ -232,6 +168,115 @@ class KalmanBoxTracker(object):
     """
     return convert_x_to_bbox(self.kf.x)
 
+def convert_bbox_to_polar(bbox):
+  """
+  Takes a bounding box in the form [x1,y1,x2,y2] and returns z in the form
+    [x,y,s,r] where x,y is the centre of the box and s is the scale/area and r is
+    the aspect ratio
+  """
+  global fov, img_width, img_height
+
+  w = bbox[2] - bbox[0]
+  h = bbox[3] - bbox[1]
+  x = bbox[0] + w/2.
+  y = bbox[1] + h/2.
+  ar = w / h
+
+  theta = x / img_width * fov
+  # r = float((img_height - h) / img_height)
+  r = float(img_height - h)
+
+  return np.array([theta, r, y, ar]).reshape((4, 1))
+
+
+def convert_polar_to_bbox(p, score=None):
+  """
+  Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
+    [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
+  """
+  global fov, img_width, img_height
+
+  theta = p[0]
+  r = p[1]
+  ar = p[3]
+
+  x = float(theta * img_width / fov)
+  y = p[2]
+  h = float(img_height - r)
+  w = ar * h
+
+  if(score==None):
+    return np.array([x-w/2., y-h/2., x+w/2., y+h/2.]).reshape((1,4))
+  else:
+    return np.array([x-w/2., y-h/2., x+w/2., y+h/2.,score]).reshape((1,5))
+
+class KalmanPolarBoxTracker(object):
+  """
+  This class represents the internal state of individual tracked objects observed as bbox.
+  """
+  count = 0
+  def __init__(self,bbox):
+    """
+    Initialises a tracker using initial bounding box.
+    """
+    #define constant velocity model
+    self.kf = KalmanFilter(dim_x=7, dim_z=4) 
+    self.kf.F = np.array([[1,0,0,0,1,0,0],
+                          [0,1,0,0,0,1,0],
+                          [0,0,1,0,0,0,1],
+                          [0,0,0,1,0,0,0],
+                          [0,0,0,0,1,0,0],
+                          [0,0,0,0,0,1,0],
+                          [0,0,0,0,0,0,1]])
+    self.kf.H = np.array([[1,0,0,0,0,0,0], 
+                          [0,1,0,0,0,0,0],
+                          [0,0,1,0,0,0,0],
+                          [0,0,0,1,0,0,0]])
+
+    self.kf.R[2:,2:] *= 10.
+    self.kf.P[4:,4:] *= 1000. #give high uncertainty to the unobservable initial velocities
+    self.kf.P *= 10.
+    self.kf.Q[-1,-1] *= 0.01
+    self.kf.Q[4:,4:] *= 0.01
+
+    self.kf.x[:4] = convert_bbox_to_polar(bbox)
+    self.time_since_update = 0
+    self.id = KalmanPolarBoxTracker.count
+    KalmanPolarBoxTracker.count += 1
+    self.history = []
+    self.hits = 0
+    self.hit_streak = 0
+    self.age = 0
+
+  def update(self,bbox):
+    """
+    Updates the state vector with observed bbox.
+    """
+    self.time_since_update = 0
+    self.history = []
+    self.hits += 1
+    self.hit_streak += 1
+    self.kf.update(convert_bbox_to_polar(bbox))
+
+  def predict(self):
+    """
+    Advances the state vector and returns the predicted bounding box estimate.
+    """
+    if((self.kf.x[6]+self.kf.x[2])<=0):
+      self.kf.x[6] *= 0.0
+    self.kf.predict()
+    self.age += 1
+    if(self.time_since_update>0):
+      self.hit_streak = 0
+    self.time_since_update += 1
+    self.history.append(convert_polar_to_bbox(self.kf.x))
+    return self.history[-1]
+
+  def get_state(self):
+    """
+    Returns the current bounding box estimate.
+    """
+    return convert_polar_to_bbox(self.kf.x)
 
 def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
   """
@@ -277,7 +322,6 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
 
   return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
 
-
 class Sort(object):
   def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
     """
@@ -319,7 +363,7 @@ class Sort(object):
 
     # create and initialise new trackers for unmatched detections
     for i in unmatched_dets:
-        trk = KalmanBoxTracker(dets[i,:])
+        trk = KalmanPolarBoxTracker(dets[i,:])
         self.trackers.append(trk)
     i = len(self.trackers)
     for trk in reversed(self.trackers):
@@ -333,6 +377,27 @@ class Sort(object):
     if(len(ret)>0):
       return np.concatenate(ret)
     return np.empty((0,5))
+
+def draw_polar_coordinate(frame, d, color):
+  global img_width, img_height
+
+  bbox = d[:4]
+
+  w = bbox[2] - bbox[0]
+  h = 50
+
+  polar = convert_bbox_to_polar(bbox)
+  theta = polar[0]
+  r = polar[1]
+
+  x = int(img_width / 2 - r * math.cos((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
+  y = int(img_height - r * math.sin((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
+  print('x : %d\ty : %d'%(x, y))
+
+  frame = cv2.circle(frame, (x, y), 2, (0, 0, 255), 2)
+  frame = cv2.rectangle(frame, (x - int(w/2), y - int(h/2)), (x + int(w/2), y + int(h/2)), (0, 255, 0), 2)
+
+  return frame
 
 def parse_args():
     """Parse input arguments."""
@@ -370,6 +435,23 @@ if __name__ == '__main__':
     os.makedirs('mr_output')
   pattern = os.path.join(args.seq_path, phase, '*', 'det', 'det.txt')
   print(pattern)
+
+  # Draw polar frame
+  white = (255, 255, 255)
+  green = (100, 255, 100)
+  polar_img = np.zeros((int(480*1.2), 640, 3), np.uint8)
+
+  intercept = 480 - 640/2*math.tan((PI-degree_to_rad(fov))/2)
+  if intercept > 0:
+    polar_img = cv2.line(polar_img, (320, 480),(0, int(intercept)), white, 1)
+    polar_img = cv2.line(polar_img, (320, 480), (640, int(intercept)), white, 1)
+  else:
+    end1 = (-1*intercept) / math.tan((PI-degree_to_rad(fov))/2)
+    end2 = 640 - end1
+    polar_img = cv2.line(polar_img, (320, 480), (end1, 480), white, 1)
+    polar_frame = cv2.line(polar_img, (320, 480), (end2, 480), white, 1)
+  polar_img = cv2.circle(polar_img, (320, 480), 10, green, 20)
+
   for seq_dets_fn in glob.glob(pattern):
     mot_tracker = Sort(max_age=args.max_age, 
                        min_hits=args.min_hits,
@@ -382,7 +464,11 @@ if __name__ == '__main__':
     
     with open(os.path.join('mr_output', '%s.txt'%(seq)),'w') as out_file:
       print("Processing %s."%(seq))
+
+
       for frame in range(int(seq_dets[:,0].max())):
+        polar_frame = polar_img.copy()
+
         frame += 1 #detection and frame numbers begin at 1
         dets = seq_dets[seq_dets[:, 0]==frame, 2:7]
         dets[:, 2:4] += dets[:, 0:2] #convert to [x1,y1,w,h] to [x1,y1,x2,y2]
@@ -404,12 +490,21 @@ if __name__ == '__main__':
           if(display):
             d = d.astype(np.int32)
             ax1.add_patch(patches.Rectangle((d[0],d[1]),d[2]-d[0],d[3]-d[1],fill=False,lw=3,ec=colours[d[4]%32,:]))
+            polar_frame = draw_polar_coordinate(polar_frame, d, colours[d[4]%32])
 
         if(display):
           fig.canvas.flush_events()
           plt.draw()
           plt.savefig(os.path.join('mr_output', seq, '%06d.jpg'%(frame)))
+
           ax1.cla()
+
+          cv2.imshow('polar', polar_frame)
+          cv2.imwrite(os.path.join('mr_output', seq, 'polar_%06d.jpg'%(frame)), polar_frame)
+
+          key = cv2.waitKey(1)
+          if key == ord('q'):
+            break
 
   print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" % (total_time, total_frames, total_frames / total_time))
 
