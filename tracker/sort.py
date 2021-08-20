@@ -238,6 +238,9 @@ class Sort(object):
     trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
     for t in reversed(to_del):
       self.trackers.pop(t)
+      
+    print('dets : ', dets.shape)
+    # print('trks : ', trks.shape)
     matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold)
 
     # update matched trackers with assigned detections
@@ -282,19 +285,23 @@ if __name__ == '__main__':
   args = parse_args()
   display = args.display
   phase = args.phase
+  # data_path = '/home/openvino/dev/mr_sort/tracker/data'
+  data_path = args.seq_path
+  output_path = 'output'
+
   total_time = 0.0
   total_frames = 0
   colours = np.random.rand(32, 3) #used only for display
   if(display):
-    if not os.path.exists('../mot_benchmark'):
+    if not os.path.exists(data_path):
       print('\n\tERROR: mot_benchmark link not found!\n\n    Create a symbolic link to the MOT benchmark\n    (https://motchallenge.net/data/2D_MOT_2015/#download). E.g.:\n\n    $ ln -s /path/to/MOT2015_challenge/2DMOT2015 ../mot_benchmark\n\n')
       exit()
     plt.ion()
     fig = plt.figure()
     ax1 = fig.add_subplot(111, aspect='equal')
 
-  if not os.path.exists('output'):
-    os.makedirs('output')
+  if not os.path.exists(output_path):
+    os.makedirs(output_path)
   pattern = os.path.join(args.seq_path, phase, '*', 'det', 'det.txt')
   for seq_dets_fn in glob.glob(pattern):
     mot_tracker = Sort(max_age=args.max_age, 
@@ -303,7 +310,7 @@ if __name__ == '__main__':
     seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
     seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
     
-    with open(os.path.join('output', '%s.txt'%(seq)),'w') as out_file:
+    with open(os.path.join(output_path, '%s.txt'%(seq)),'w') as out_file:
       print("Processing %s."%(seq))
       for frame in range(int(seq_dets[:,0].max())):
         frame += 1 #detection and frame numbers begin at 1
@@ -312,7 +319,7 @@ if __name__ == '__main__':
         total_frames += 1
 
         if(display):
-          fn = os.path.join('../mot_benchmark', phase, seq, 'img1', '%06d.jpg'%(frame))
+          fn = os.path.join(data_path, phase, seq, 'img1', '%06d.jpg'%(frame))
           im =io.imread(fn)
           ax1.imshow(im)
           plt.title(seq + ' Tracked Targets')
