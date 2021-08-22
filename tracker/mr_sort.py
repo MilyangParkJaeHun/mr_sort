@@ -380,6 +380,9 @@ def fit_polar_frame(bbox):
 
     return np.array([xmin, ymin, xmax, ymax]).astype(np.int32)
 
+def done_sequence():
+    KalmanPolarBoxTracker.count = 0
+
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='SORT demo')
@@ -449,8 +452,7 @@ if __name__ == '__main__':
     polar_img = cv2.circle(polar_img, (int(pimg_w/2), pimg_h), 10, green, 20)
 
     # sequnce pattern loop
-    # pbbox_shape_list = [[a, b] for a in range(5, 25, 5) for b in range(5, 25, 5)]
-    pbbox_shape_list = [[20, 10]]
+    pbbox_shape_list = [[a, b] for a in range(5, 25, 5) for b in range(5, 25, 5)]
 
     for pbbox_shape in pbbox_shape_list:
         print('pbbox shape : ', pbbox_shape)
@@ -540,6 +542,7 @@ if __name__ == '__main__':
                         key = cv2.waitKey(1)
                         if key == ord('q'):
                             break
+        done_sequence()
 
         print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" %
             (total_time, total_frames, total_frames / total_time))
