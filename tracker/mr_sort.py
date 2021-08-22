@@ -424,8 +424,6 @@ if __name__ == '__main__':
         fig = plt.figure()
         ax1 = fig.add_subplot(111, aspect='equal')
 
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
 
     pattern = os.path.join(args.seq_path, phase, '*', 'det', 'det.txt')
     print(pattern)
@@ -451,86 +449,100 @@ if __name__ == '__main__':
     polar_img = cv2.circle(polar_img, (int(pimg_w/2), pimg_h), 10, green, 20)
 
     # sequnce pattern loop
-    for seq_dets_fn in glob.glob(pattern):
+    # pbbox_shape_list = [[a, b] for a in range(5, 25, 5) for b in range(5, 25, 5)]
+    pbbox_shape_list = [[20, 10]]
 
-        seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
-        seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
+    for pbbox_shape in pbbox_shape_list:
+        print('pbbox shape : ', pbbox_shape)
 
-        # read sequnce info
-        info_fn = os.path.join(data_path, phase, seq, 'seqinfo.ini')
-        if not os.path.exists(info_fn):
-            print('\n\tERROR: sequcne info not found!\n\n')
-            exit()
-        config.read(info_fn)
-        frame_width = int(config['Sequence']['imWidth'])
-        frame_height = int(config['Sequence']['imHeight'])
+        output_path = os.path.join('static', '%d_%d'%(pbbox_shape[0], pbbox_shape[1]))
 
-        mot_tracker = Sort(max_age=args.max_age,
-                        min_hits=args.min_hits,
-                        iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
 
-        if display and not os.path.exists(os.path.join(output_path, seq)):
-            os.makedirs(os.path.join(output_path, seq))
+        for seq_dets_fn in glob.glob(pattern):
 
-        with open(os.path.join(output_path, '%s.txt' % (seq)), 'w') as out_file:
-            print("Processing %s." % (seq))
-            print("Image width  : ", frame_width)
-            print("Image height : ", frame_height)
+            seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
+            seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
 
-            for frame in range(int(seq_dets[:, 0].max())):
-                frame += 1  # detection and frame numbers begin at 1
-                polar_frame = polar_img.copy()
+            # read sequnce info
+            info_fn = os.path.join(data_path, phase, seq, 'seqinfo.ini')
+            if not os.path.exists(info_fn):
+                print('\n\tERROR: sequcne info not found!\n\n')
+                exit()
+            config.read(info_fn)
+            frame_width = int(config['Sequence']['imWidth'])
+            frame_height = int(config['Sequence']['imHeight'])
 
-                dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
-                # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
-                dets[:, 2:4] += dets[:, 0:2]
-                total_frames += 1
+            pbbox_width = int(frame_width * pbbox_shape[0] / 100)
+            pbbox_height = int(frame_height * pbbox_shape[1] / 100)
 
-                if(display):
-                    fn = os.path.join(data_path, phase, seq,
-                                    'img1', '%06d.jpg' % (frame))
-                    im = io.imread(fn)
-                    ax1.imshow(im)
-                    plt.title(seq + ' Tracked Targets')
+            mot_tracker = Sort(max_age=args.max_age,
+                            min_hits=args.min_hits,
+                            iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
 
-                start_time = time.time()
-                trackers = mot_tracker.update(dets)
-                cycle_time = time.time() - start_time
-                total_time += cycle_time
+            if display and not os.path.exists(os.path.join(output_path, seq)):
+                os.makedirs(os.path.join(output_path, seq))
 
-                for d in dets:
-                    pbbox = fit_polar_frame(convert_bbox_to_pbbox(d))
-                    polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), (255, 255, 255), 2)
+            with open(os.path.join(output_path, '%s.txt' % (seq)), 'w') as out_file:
+                print("Processing %s." % (seq))
+                print("Image width  : ", frame_width)
+                print("Image height : ", frame_height)
 
+                for frame in range(int(seq_dets[:, 0].max())):
+                    frame += 1  # detection and frame numbers begin at 1
+                    polar_frame = polar_img.copy()
 
-                for d in trackers:
-                    print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
-                        d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]), file=out_file)
+                    dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
+                    # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
+                    dets[:, 2:4] += dets[:, 0:2]
+                    total_frames += 1
+
                     if(display):
-                        d = d.astype(np.int32)
-                        ax1.add_patch(patches.Rectangle(
-                            (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
-                        polar_frame = draw_polar_coordinate(
-                            polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
+                        fn = os.path.join(data_path, phase, seq,
+                                        'img1', '%06d.jpg' % (frame))
+                        im = io.imread(fn)
+                        ax1.imshow(im)
+                        plt.title(seq + ' Tracked Targets')
 
-                if(display):
-                    fig.canvas.flush_events()
-                    plt.draw()
-                    plt.savefig(os.path.join(
-                        output_path, seq, '%06d.jpg' % (frame)))
+                    start_time = time.time()
+                    trackers = mot_tracker.update(dets)
+                    cycle_time = time.time() - start_time
+                    total_time += cycle_time
 
-                    ax1.cla()
+                    for d in dets:
+                        pbbox = fit_polar_frame(convert_bbox_to_pbbox(d))
+                        polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), (255, 255, 255), 2)
 
-                    cv2.imshow('polar', polar_frame)
-                    cv2.imwrite(os.path.join(output_path, seq,
-                                'polar_%06d.jpg' % (frame)), polar_frame)
 
-                    key = cv2.waitKey(1)
-                    if key == ord('q'):
-                        break
+                    for d in trackers:
+                        print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
+                            d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]), file=out_file)
+                        if(display):
+                            d = d.astype(np.int32)
+                            ax1.add_patch(patches.Rectangle(
+                                (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
+                            polar_frame = draw_polar_coordinate(
+                                polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
 
-    print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" %
-        (total_time, total_frames, total_frames / total_time))
+                    if(display):
+                        fig.canvas.flush_events()
+                        plt.draw()
+                        plt.savefig(os.path.join(
+                            output_path, seq, '%06d.jpg' % (frame)))
 
-    if(display):
-        print("Note: to get real runtime results run without the option: --display")
+                        ax1.cla()
+
+                        cv2.imshow('polar', polar_frame)
+                        cv2.imwrite(os.path.join(output_path, seq,
+                                    'polar_%06d.jpg' % (frame)), polar_frame)
+
+                        key = cv2.waitKey(1)
+                        if key == ord('q'):
+                            break
+
+        print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" %
+            (total_time, total_frames, total_frames / total_time))
+
+        if(display):
+            print("Note: to get real runtime results run without the option: --display")
