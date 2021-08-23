@@ -378,6 +378,36 @@ def fit_polar_frame(bbox):
 
     return np.array([xmin, ymin, xmax, ymax]).astype(np.int32)
 
+def read_odom(odom_fn):
+    before_th = 0
+    before_x = 0
+    before_y = 0
+
+    info = dict()
+    with open(odom_fn, 'r') as in_file:
+        start = True
+        while True:
+            line = in_file.readline()
+            if not line:
+                break
+            data = line[:-1].split(',')
+            img_fn = data[0]
+            th = float(data[1])
+            x = float(data[2])
+            y = float(data[3])
+
+            if start:
+                info[img_fn] = [0, 0, 0]
+                start = False
+            else:
+                info[img_fn] = [rad_to_degree(th-before_th), x-before_x, y-before_y]
+
+            before_th = th
+            before_x = x
+            before_y = y
+
+    return info
+
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='SORT demo')
@@ -399,7 +429,6 @@ def parse_args():
                         help="Minimum IOU for match.", type=float, default=0.3)
     args = parser.parse_args()
     return args
-
 
 if __name__ == '__main__':
     # all train
@@ -463,6 +492,10 @@ if __name__ == '__main__':
         frame_width = int(config['Sequence']['imWidth'])
         frame_height = int(config['Sequence']['imHeight'])
 
+        # read odom info
+        odom_fn = os.path.join(data_path, phase, seq, 'odom', 'odom.txt')
+        odom_info = read_odom(odom_fn)
+
         mot_tracker = Sort(max_age=args.max_age,
                         min_hits=args.min_hits,
                         iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
@@ -477,6 +510,8 @@ if __name__ == '__main__':
 
             for frame in range(int(seq_dets[:, 0].max())):
                 frame += 1  # detection and frame numbers begin at 1
+                img_fn = '%06d.jpg' % (frame)
+                odom = odom_info[img_fn]
                 polar_frame = polar_img.copy()
 
                 dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
@@ -490,6 +525,25 @@ if __name__ == '__main__':
                     im = io.imread(fn)
                     ax1.imshow(im)
                     plt.title(seq + ' Tracked Targets')
+
+                    polar_frame = cv2.line(polar_frame, (int(pimg_w/2), int(pimg_h*0.9)), (int(pimg_w/2), int(pimg_h*0.9)), (255,0,0), 5)
+                    arrow_end = (int(pimg_w/2 - 10*(odom[0]/180)*pimg_w/2), int(pimg_h*0.9))
+                    if arrow_end[0] < 0:
+                        arrow_end = list(arrow_end)
+                        arrow_end[0] = 1
+                        arrow_end = tuple(arrow_end)
+                    if arrow_end[0] > pimg_w:
+                        arrow_end = list(arrow_end)
+                        arrow_end[0] = pimg_w
+                        arrow_end = tuple(arrow_end)
+                    arrow_color = (255, 0, 0)
+                    if arrow_end[0] > pimg_w/2:
+                        arrow_color = (0, 255,0)
+                    else:
+                        arrow_color = (0, 0, 255)
+
+                    polar_frame = cv2.arrowedLine(polar_frame, (int(pimg_w/2), int(pimg_h*0.9)), arrow_end, arrow_color, 5)
+                    polar_frame = cv2.putText(polar_frame, 'degree : %.2f'%(odom[0]),(30, int(pimg_h*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
                 start_time = time.time()
                 trackers, predicts = mot_tracker.update(dets)
