@@ -55,6 +55,7 @@ if __name__ == "__main__":
 
         with open(odom_fn, 'r') as odom_file:
             before_theta = 0
+            start = True
             while True:
                 line = odom_file.readline()
                 if not line:
@@ -63,6 +64,10 @@ if __name__ == "__main__":
                 data = line.split(',')
                 img_fn = data[0]
                 theta = float(data[1])
+
+                if(start):
+                    before_theta = theta
+                    start = False
                 gap_theta = theta - before_theta
 
                 frame = cv2.imread(os.path.join(img_dir, img_fn))
