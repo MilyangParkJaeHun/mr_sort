@@ -38,7 +38,7 @@ matplotlib.use('TkAgg')
 config = configparser.ConfigParser()
 np.random.seed(0)
 
-fov = 140  # camera's field of view
+fov = 113  # camera's field of view
 PI = 3.14159265
 frame_width = 640
 frame_height = 480
@@ -157,8 +157,6 @@ def convert_bbox_to_pbbox(bbox):
     else:
         return np.array(pbbox)
 
-
-
 def draw_polar_coordinate(frame, d, color, frame_w, frame_h):
     cv_color = color * 255
     cv_color = [cv_color[2], cv_color[1], cv_color[0]]
@@ -181,7 +179,6 @@ def draw_polar_coordinate(frame, d, color, frame_w, frame_h):
                           (x + int(w/2), y + int(h/2)), cv_color, 2)
 
     return frame
-
 
 class KalmanPolarBoxTracker(object):
     """
@@ -302,6 +299,7 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
 
 
 class Sort(object):
+
     def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
         """
         Sets key parameters for SORT
@@ -329,7 +327,7 @@ class Sort(object):
         for t, trk in enumerate(trks):
             # pos format : pbbox
             pos = self.trackers[t].predict()[0]
-            trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
+            trk[:] = [pos[0], pos[1], pos[2], pos[3], self.trackers[t].id+1]
             if np.any(np.isnan(pos)):
                 to_del.append(t)
         trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
@@ -367,8 +365,8 @@ class Sort(object):
             if(trk.time_since_update > self.max_age):
                 self.trackers.pop(i)
         if(len(ret) > 0):
-            return np.concatenate(ret)
-        return np.empty((0, 5))
+            return [np.concatenate(ret), trks]
+        return [np.empty((0, 5)), trks]
 
 def fit_polar_frame(bbox):
     global frame_width, frame_height, pimg_w, pimg_h
@@ -482,7 +480,7 @@ if __name__ == '__main__':
                 polar_frame = polar_img.copy()
 
                 dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
-                # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
+                # convert to [x1,y1,w,h] to [x1,y1,x2,y2] 
                 dets[:, 2:4] += dets[:, 0:2]
                 total_frames += 1
 
@@ -494,7 +492,7 @@ if __name__ == '__main__':
                     plt.title(seq + ' Tracked Targets')
 
                 start_time = time.time()
-                trackers = mot_tracker.update(dets)
+                trackers, predicts = mot_tracker.update(dets)
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
@@ -502,6 +500,13 @@ if __name__ == '__main__':
                     pbbox = fit_polar_frame(convert_bbox_to_pbbox(d))
                     polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), (255, 255, 255), 2)
 
+                for id, pbbox in enumerate(predicts):
+                    pbbox = pbbox.astype(np.uint32)
+                    color = colours[pbbox[4] % 32, :]
+                    cv_color = color * 255
+                    cv_color = [cv_color[2], cv_color[1], cv_color[0]]
+
+                    polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
 
                 for d in trackers:
                     print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
@@ -510,8 +515,8 @@ if __name__ == '__main__':
                         d = d.astype(np.int32)
                         ax1.add_patch(patches.Rectangle(
                             (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
-                        polar_frame = draw_polar_coordinate(
-                            polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
+                    #     polar_frame = draw_polar_coordinate(
+                    #         polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
 
                 if(display):
                     fig.canvas.flush_events()
