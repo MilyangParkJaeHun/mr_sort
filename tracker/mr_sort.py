@@ -30,6 +30,7 @@ import cv2
 import math
 import numpy as np
 import matplotlib
+import sys
 matplotlib.use('TkAgg')
 
 # from filterpy.kalman import KalmanFilter
@@ -144,7 +145,12 @@ def convert_polar_to_pbbox(polar):
     y = int(frame_height - r *
             math.sin((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
 
-    return np.array([x - int(w/2), y - int(h/2), x + int(w/2), y + int(h/2)]).reshape((1, 4))
+    xmin = x - int(w/2) if x - int(w/2) > 0 else 0
+    ymin = y - int(h/2) if y - int(h/2) > 0 else 0
+    xmax = x + int(w/2) if x + int(w/2) <= frame_width else frame_width
+    ymax = y + int(h/2) if y + int(h/2) <= frame_height else frame_height
+
+    return np.array([xmin, ymin, xmax, ymax]).reshape((1, 4))
 
 def convert_bbox_to_pbbox(bbox):
     global pbbox_height
@@ -179,6 +185,11 @@ def draw_polar_coordinate(frame, d, color, frame_w, frame_h):
                           (x + int(w/2), y + int(h/2)), cv_color, 2)
 
     return frame
+
+def cal_cam_move(polar, th):
+    polar[0] += th
+
+    return polar
 
 class KalmanPolarBoxTracker(object):
     """
@@ -230,7 +241,7 @@ class KalmanPolarBoxTracker(object):
         # bbox -> polar
         self.kf.update(convert_bbox_to_polar(bbox))
 
-    def predict(self):
+    def predict(self, d_th):
         """
         Advances the state vector and returns the predicted bounding box estimate.
         """
@@ -242,7 +253,7 @@ class KalmanPolarBoxTracker(object):
             self.hit_streak = 0
         self.time_since_update += 1
         # polar -> pbbox
-        self.history.append(convert_polar_to_pbbox(self.kf.x))
+        self.history.append(convert_polar_to_pbbox(cal_cam_move(self.kf.x, d_th)))
         return self.history[-1]
 
     def get_state(self):
@@ -310,7 +321,7 @@ class Sort(object):
         self.trackers = []
         self.frame_count = 0
 
-    def update(self, dets=np.empty((0, 5))):
+    def update(self, dets=np.empty((0, 5)), odom=[0,0,0]):
         """
         Params:
           dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
@@ -326,7 +337,8 @@ class Sort(object):
         ret = []
         for t, trk in enumerate(trks):
             # pos format : pbbox
-            pos = self.trackers[t].predict()[0]
+            d_th = odom[0]
+            pos = self.trackers[t].predict(d_th)[0]
             trk[:] = [pos[0], pos[1], pos[2], pos[3], self.trackers[t].id+1]
             if np.any(np.isnan(pos)):
                 to_del.append(t)
@@ -546,7 +558,7 @@ if __name__ == '__main__':
                     polar_frame = cv2.putText(polar_frame, 'degree : %.2f'%(odom[0]),(30, int(pimg_h*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
                 start_time = time.time()
-                trackers, predicts = mot_tracker.update(dets)
+                trackers, predicts = mot_tracker.update(dets, odom)
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
@@ -560,7 +572,11 @@ if __name__ == '__main__':
                     cv_color = color * 255
                     cv_color = [cv_color[2], cv_color[1], cv_color[0]]
 
-                    polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
+                    try:
+                        polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
+                    except:
+                        print(pbbox)
+                        sys.exit(0)
 
                 for d in trackers:
                     print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
