@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 
 import os
 import cv2
+import sys
 import math
 import numpy as np
 import matplotlib
@@ -84,6 +85,7 @@ def iou_batch(bb_test, bb_gt):
     w = np.maximum(0., xx2 - xx1)
     h = np.maximum(0., yy2 - yy1)
     wh = w * h
+    
     o = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])
               + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
     return(o)
@@ -98,12 +100,13 @@ def convert_polar_to_bbox(p, score=None):
     global fov, frame_width, frame_height
 
     theta = p[0]
-    r = p[1]
+    r = p[1] if p[1] <= frame_height else frame_height
     ar = p[3]
 
     x = float(theta * frame_width / fov)
     y = p[2]
-    h = frame_height - (r - min_height) * frame_height / (frame_height - min_height)
+    # h = frame_height - (r - min_height) * frame_height / (frame_height - min_height)
+    h = frame_height * math.sqrt((frame_height - r)/(frame_height - min_height))
     w = ar * h
 
     if(score == None):
@@ -119,14 +122,23 @@ def convert_bbox_to_polar(bbox):
     """
     global fov, frame_width, frame_height
 
+    if bbox[2] > frame_width:
+        bbox[2] = frame_width
+    if bbox[3] > frame_height:
+        bbox[3] = frame_height
+
     w = bbox[2] - bbox[0]
     h = bbox[3] - bbox[1]
+
     x = bbox[0] + w/2.
     y = bbox[1] + h/2.
     ar = w / h
 
     theta = (x / frame_width) * fov
-    r = min_height + (frame_height - min_height) * (frame_height - h) / frame_height
+    # r = min_height + (frame_height - min_height) * (frame_height - h) / frame_height
+    r = -1*h*h *(frame_height - min_height) / (frame_height * frame_height) + frame_height
+    if r < min_height:
+        r = min_height
 
     return np.array([theta, r, y, ar]).reshape((4, 1))
 
@@ -144,7 +156,24 @@ def convert_polar_to_pbbox(polar):
     y = int(frame_height - r *
             math.sin((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
 
-    return np.array([x - int(w/2), y - int(h/2), x + int(w/2), y + int(h/2)]).reshape((1, 4))
+    if y < 0:
+        y = 0
+    # if y < -10:
+    #     print('tmp : ', r * math.sin((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
+    #     print('y : ', y)
+    #     print('polar : ', polar)
+    #     sys.exit(1)
+    # if h < -10:
+    #     print('h : ', h)
+    #     print('polar : ', polar)
+    #     sys.exit(1)
+
+    xmin = x - int(w/2) if x - int(w/2) > 0 else 0
+    ymin = y - int(h/2) if y - int(h/2) > 0 else 0
+    xmax = x + int(w/2) if x + int(w/2) <= frame_width else frame_width
+    ymax = y + int(h/2) if y + int(h/2) <= frame_height else frame_height
+
+    return np.array([xmin, ymin, xmax, ymax]).reshape((1, 4))
 
 def convert_bbox_to_pbbox(bbox):
     global pbbox_height
@@ -168,6 +197,7 @@ def draw_polar_coordinate(frame, d, color, frame_w, frame_h):
     # polar = convert_bbox_to_polar(bbox)
     # pbbox = fit_polar_frame(convert_polar_to_pbbox(polar)[0])
     pbbox = fit_polar_frame(convert_bbox_to_pbbox(d))
+    # pbbox = convert_bbox_to_pbbox(d)
 
     x = int((pbbox[0] + pbbox[2])/2)
     y = int((pbbox[1] + pbbox[3])/2)
@@ -179,6 +209,11 @@ def draw_polar_coordinate(frame, d, color, frame_w, frame_h):
                           (x + int(w/2), y + int(h/2)), cv_color, 2)
 
     return frame
+
+def cal_cam_move(x, th):
+    x[0] += th
+
+    return x
 
 class KalmanPolarBoxTracker(object):
     """
@@ -310,7 +345,7 @@ class Sort(object):
         self.trackers = []
         self.frame_count = 0
 
-    def update(self, dets=np.empty((0, 5))):
+    def update(self, dets=np.empty((0, 5)), odom=[0, 0, 0]):
         """
         Params:
           dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
@@ -326,6 +361,11 @@ class Sort(object):
         ret = []
         for t, trk in enumerate(trks):
             # pos format : pbbox
+            d_th = odom[0]
+            # print('before : ', self.trackers[t].kf.x[0])
+            cal_cam_move(self.trackers[t].kf.x, d_th)
+            # print('after : ', self.trackers[t].kf.x[0])
+            # print('----------------------------------------------------')
             pos = self.trackers[t].predict()[0]
             trk[:] = [pos[0], pos[1], pos[2], pos[3], self.trackers[t].id+1]
             if np.any(np.isnan(pos)):
@@ -376,7 +416,8 @@ def fit_polar_frame(bbox):
     xmax = (bbox[2]/frame_width)*pimg_w
     ymax = (bbox[3]/frame_height)*pimg_h
 
-    return np.array([xmin, ymin, xmax, ymax]).astype(np.int32)
+    ret = np.array([xmin, ymin, xmax, ymax]).astype(np.int32)
+    return ret
 
 def read_odom(odom_fn):
     before_th = 0
@@ -473,7 +514,7 @@ if __name__ == '__main__':
         end2 = pimg_w - end1
         polar_img = cv2.line(
             polar_img, (int(pimg_w/2), pimg_h), (end1, pimg_h), white, 1)
-        polar_frame = cv2.line(
+        polar_img = cv2.line(
             polar_img, (int(pimg_w/2), pimg_h), (end2, pimg_h), white, 1)
     polar_img = cv2.circle(polar_img, (int(pimg_w/2), pimg_h), 10, green, 20)
 
@@ -494,7 +535,14 @@ if __name__ == '__main__':
 
         # read odom info
         odom_fn = os.path.join(data_path, phase, seq, 'odom', 'odom.txt')
-        odom_info = read_odom(odom_fn)
+        odom_info = dict()
+        odom_mode = False
+        if not os.path.exists(odom_fn):
+            print("Run non odom mode : odom file isn't exists")
+
+        else:
+            odom_info = read_odom(odom_fn)
+            odom_mode = True
 
         mot_tracker = Sort(max_age=args.max_age,
                         min_hits=args.min_hits,
@@ -511,8 +559,13 @@ if __name__ == '__main__':
             for frame in range(int(seq_dets[:, 0].max())):
                 frame += 1  # detection and frame numbers begin at 1
                 img_fn = '%06d.jpg' % (frame)
-                odom = odom_info[img_fn]
+                if odom_mode:
+                    odom = odom_info[img_fn]
+                else:
+                    odom = [0, 0, 0]
                 polar_frame = polar_img.copy()
+                det_frame = cv2.imread(os.path.join(data_path, phase, seq, 'img1', img_fn))
+                # print(os.path.join(data_path, phase, seq, 'img1', img_fn))
 
                 dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
                 # convert to [x1,y1,w,h] to [x1,y1,x2,y2] 
@@ -542,17 +595,20 @@ if __name__ == '__main__':
                     else:
                         arrow_color = (0, 0, 255)
 
-                    polar_frame = cv2.arrowedLine(polar_frame, (int(pimg_w/2), int(pimg_h*0.9)), arrow_end, arrow_color, 5)
-                    polar_frame = cv2.putText(polar_frame, 'degree : %.2f'%(odom[0]),(30, int(pimg_h*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                    if odom_mode:
+                        polar_frame = cv2.arrowedLine(polar_frame, (int(pimg_w/2), int(pimg_h*0.9)), arrow_end, arrow_color, 5)
+                        polar_frame = cv2.putText(polar_frame, 'degree : %.2f'%(odom[0]),(30, int(pimg_h*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
                 start_time = time.time()
-                trackers, predicts = mot_tracker.update(dets)
+                trackers, predicts = mot_tracker.update(dets, odom)
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
                 for d in dets:
                     pbbox = fit_polar_frame(convert_bbox_to_pbbox(d))
                     polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), (255, 255, 255), 2)
+                    d = d.astype(np.int32)
+                    det_frame = cv2.rectangle(det_frame, (d[0],d[1]), (d[2],d[3]), (0, 0, 0), 2)
 
                 for id, pbbox in enumerate(predicts):
                     pbbox = pbbox.astype(np.uint32)
@@ -560,6 +616,7 @@ if __name__ == '__main__':
                     cv_color = color * 255
                     cv_color = [cv_color[2], cv_color[1], cv_color[0]]
 
+                    pbbox = fit_polar_frame(pbbox[:4])
                     polar_frame = cv2.rectangle(polar_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
 
                 for d in trackers:
@@ -569,8 +626,8 @@ if __name__ == '__main__':
                         d = d.astype(np.int32)
                         ax1.add_patch(patches.Rectangle(
                             (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
-                    #     polar_frame = draw_polar_coordinate(
-                    #         polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
+                        # polar_frame = draw_polar_coordinate(
+                            # polar_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
 
                 if(display):
                     fig.canvas.flush_events()
@@ -581,13 +638,18 @@ if __name__ == '__main__':
                     ax1.cla()
 
                     cv2.imshow('polar', polar_frame)
+                    cv2.imshow('det', det_frame)
                     cv2.imwrite(os.path.join(output_path, seq,
                                 'polar_%06d.jpg' % (frame)), polar_frame)
+                    cv2.imwrite(os.path.join(output_path, seq,
+                                'det_%06d.jpg' % (frame)), det_frame)
 
                     key = cv2.waitKey(1)
                     if key == ord('q'):
                         break
 
+    if total_time == 0:
+        total_time = 1.
     print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" %
         (total_time, total_frames, total_frames / total_time))
 
