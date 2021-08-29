@@ -100,13 +100,15 @@ def convert_polar_to_bbox(p, score=None):
     global fov, frame_width, frame_height
 
     theta = p[0]
-    r = p[1] if p[1] <= frame_height else frame_height
+    r = p[1] if p[1] > min_height else min_height
     ar = p[3]
 
     x = float(theta * frame_width / fov)
     y = p[2]
     # h = frame_height - (r - min_height) * frame_height / (frame_height - min_height)
-    h = frame_height * math.sqrt((frame_height - r)/(frame_height - min_height))
+    # h = frame_height * math.sqrt((frame_height - r)/(frame_height - min_height))
+
+    h = -1 * frame_height * math.sqrt((r - min_height)/(frame_height - min_height)) + frame_height
     w = ar * h
 
     if(score == None):
@@ -136,7 +138,8 @@ def convert_bbox_to_polar(bbox):
 
     theta = (x / frame_width) * fov
     # r = min_height + (frame_height - min_height) * (frame_height - h) / frame_height
-    r = -1*h*h *(frame_height - min_height) / (frame_height * frame_height) + frame_height
+    # r = -1*h*h *(frame_height - min_height) / (frame_height * frame_height) + frame_height
+    r = (h - frame_height)*(h - frame_height)*(frame_height - min_height) / (frame_height*frame_height) + min_height
     if r < min_height:
         r = min_height
 
@@ -158,15 +161,6 @@ def convert_polar_to_pbbox(polar):
 
     if y < 0:
         y = 0
-    # if y < -10:
-    #     print('tmp : ', r * math.sin((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
-    #     print('y : ', y)
-    #     print('polar : ', polar)
-    #     sys.exit(1)
-    # if h < -10:
-    #     print('h : ', h)
-    #     print('polar : ', polar)
-    #     sys.exit(1)
 
     xmin = x - int(w/2) if x - int(w/2) > 0 else 0
     ymin = y - int(h/2) if y - int(h/2) > 0 else 0
