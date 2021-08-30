@@ -33,7 +33,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
 
-# from filterpy.kalman import KalmanFilter
+from filterpy.kalman import EKF
 
 
 config = configparser.ConfigParser()
@@ -50,6 +50,9 @@ pimg_h = 480
 
 pbbox_height = 100
 pbbox_width = 100
+
+min_ratio = 0.05
+max_ratio = 0.3
 
 
 def degree_to_rad(degree):
@@ -145,14 +148,28 @@ def convert_bbox_to_polar(bbox):
 
     return np.array([theta, r, y, ar]).reshape((4, 1))
 
+def get_pbbox_size(r, frame_width, frame_height):
+    global min_height, min_ratio, max_ratio
+
+    min_size = frame_height * min_ratio
+    max_size = frame_height * max_ratio
+
+    ratio = (frame_height - r) / frame_height
+    box_size = min_size + (max_size - min_size ) * ratio
+
+    w = box_size
+    h = box_size
+    return w, h
+
 def convert_polar_to_pbbox(polar):
     global pbbox_height, pbbox_width, frame_width, frame_height
 
     theta = polar[0]
     r = polar[1]
 
-    w = pbbox_width
-    h = pbbox_height
+    w, h = get_pbbox_size(r, frame_width, frame_height)
+    # w = pbbox_width
+    # h = pbbox_height
 
     x = int(frame_width / 2 - r *
             math.cos((PI - degree_to_rad(fov))/2 + degree_to_rad(theta)))
@@ -462,6 +479,10 @@ def parse_args():
                         type=int, default=3)
     parser.add_argument("--iou_threshold",
                         help="Minimum IOU for match.", type=float, default=0.3)
+    parser.add_argument("--min_ratio",
+                        help="Minimum IOU for match.", type=float, default=0.3)
+    parser.add_argument("--max_ratio",
+                        help="Minimum IOU for match.", type=float, default=0.3)
     args = parser.parse_args()
     return args
 
@@ -470,6 +491,8 @@ if __name__ == '__main__':
     args = parse_args()
     display = args.display
     phase = args.phase
+    min_ratio = args.min_ratio
+    max_ratio = args.max_ratio
 
     data_path = args.seq_path
     output_path = args.out_path
