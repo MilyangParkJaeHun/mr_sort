@@ -18,6 +18,8 @@
 from __future__ import print_function
 from filterpy.kalman import EKF
 import configparser
+
+from numpy import ma
 from kalman import KalmanFilter
 import argparse
 import time
@@ -32,6 +34,7 @@ import sys
 import math
 import numpy as np
 import matplotlib
+from functools import cmp_to_key
 matplotlib.use('TkAgg')
 
 
@@ -136,54 +139,68 @@ def cal_cam_move(x, th):
 
     return x
 
+def h_compare(x, y):
+    if x[0] > y[0]:
+        return 1
+    elif x[0] == y[0]:
+        if x[1] < y[1]:
+            return 1
+        else:
+            return 0
+    else:
+        return 0
+
 class PedestrianMask(object):
     def __init__(self):
         self.max_age_bound = 20
-        self.area_mask = np.zeros((frame_width+1,2))
-        self.area_mask.fill(-1)
-        self.dx_mask = np.zeros(frame_width+1)
-        self.dx_mask.fill(-1)
+        self.area_mask = []
+        self.dx_mask = []
+        self.mask_list = []
+        self.mask_count = 0
 
     def clear(self):
-        self.area_mask.fill(-1)
-        self.dx_mask.fill(-1)
+        self.area_mask.clear()
+        self.dx_mask.clear()
+        self.mask_list.clear()
+        self.mask_count = 0
 
-    def update(self, xmin, xmax, dx):
-        if xmin < 0: xmin = 0
-        if xmax > frame_width: xmax = frame_width
+    def update(self):
+        sorted(self.mask_list, key=cmp_to_key(h_compare))
 
-        start = self.area_mask[xmin][0]
-        if start == -1 and xmin > 0:
-            start = self.area_mask[xmin-1][0]
-        
-        if start == -1:
-            start = xmin
-        
-        end = self.area_mask[xmax][1]
-        if end == -1 and xmax < frame_width:
-            end = self.area_mask[xmax+1][1]
+        for mask in self.mask_list:
+            self.mask_count +=1
+            self.area_mask.append(mask[1:3])
+            self.dx_mask.append(mask[3])
 
-        if end == -1:
-            end = xmax
-        
-        self.area_mask[xmin:xmax,0].fill(start)
-        self.area_mask[xmin:xmax,1].fill(end)
+    def append(self, bbox, dx):
+        xmin = bbox[0]
+        xmax = bbox[2]
+        h = bbox[3] - bbox[1]
+        self.mask_list.append([h, xmin, xmax, dx])
 
-        self.dx_mask[xmin:xmax].fill(float(dx))
-
-    def get_escape_time(self, x, dx):
+    def get_escape_time(self, bbox, dx):
         # print(self.area_mask[x])
-        if x > frame_width: x = frame_width
-        if x < 0: x = 0
-        area = self.area_mask[x][0] - self.area_mask[x][1]
-        if area == 0:
-            return -1
-        mask_dx = float(self.dx_mask[x])
-        dx -= mask_dx
-        if dx == 0:
-            return self.max_age_bound
-        escape_time = abs(int(area / dx))
-        if escape_time > self.max_age_bound: escape_time = self.max_age_bound
+        xmin = bbox[0]
+        xmax = bbox[2]
+
+        escape_time = -1
+        for i in range(self.mask_count):
+            area = self.area_mask[i]
+            mask_dx = self.dx_mask[i]
+            dx -= mask_dx
+            if (xmin <= area[1] and xmin >= area[0]) or (xmax <= area[1] and xmax >= area[0]):
+                if dx > 0:
+                    escape_time = (area[1] - xmin) / dx
+                    break
+                elif dx < 0:
+                    escape_time = (xmax - area[0]) / dx
+                    break
+                else:
+                    escape_time = self.max_age_bound
+                    break
+        if escape_time > self.max_age_bound:
+            escape_time = self.max_age_bound
+        
         return escape_time
 
 class KalmanBoxTracker(object):
@@ -355,24 +372,25 @@ class Sort(object):
         for m in matched:
             self.trackers[m[1]].update(dets[m[0], :])
 
-            xmin = int(dets[m[0]][0])
-            xmax = int(dets[m[0]][2])
             dx = self.trackers[m[1]].kf.x[4]
-            self.mask.update(xmin, xmax, dx)
+            self.mask.append(dets[m[0]], dx)
 
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
             trk = KalmanBoxTracker(dets[i, :], self.max_age)
             self.trackers.append(trk)
 
-            xmin = int(dets[i][0])
-            xmax = int(dets[i][2])
-            self.mask.update(xmin, xmax, 0)
+            self.mask.append(dets[i], 0)
 
+        if len(unmatched_trks) > 0:
+            self.mask.update()
+
+        # print('----------------------------------------')
         for i in unmatched_trks:
-            x = int(self.trackers[i].kf.x[0])
+            bbox = convert_x_to_bbox(self.trackers[i].kf.x)[0]
             dx = float(self.trackers[i].kf.x[4])
-            max_age = self.mask.get_escape_time(x, dx)
+            max_age = self.mask.get_escape_time(bbox, dx)
+            # print(max_age)
 
             if max_age == -1:                
                 self.trackers[i].is_occluded = False
@@ -579,7 +597,7 @@ if __name__ == '__main__':
                 total_time += cycle_time
 
                 if display:
-                    mask = mot_tracker.mask
+                    mask_list = mot_tracker.mask.area_mask
                     for d in dets:
                         d = d.astype(np.int32)
                         det_frame = cv2.rectangle(
@@ -587,16 +605,11 @@ if __name__ == '__main__':
                         odom_frame = cv2.rectangle(
                             odom_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
 
-                        i = 0
-                        while True:
-                            if i > frame_width:
-                                break
-                            xmin = int(mask.area_mask[i][0])
-                            xmax = int(mask.area_mask[i][1])
-
+                        for mask in mask_list:
+                            xmin = int(mask[0])
+                            xmax = int(mask[1])
+                            print(mask)
                             cv2.rectangle(odom_frame, (xmin, frame_height-50), (xmax, frame_height), (0, 0, 0), 2)
-                            if xmax == -1: i += 1
-                            else: i = xmax + 1
 
 
                     for id, pbbox in enumerate(predicts):
