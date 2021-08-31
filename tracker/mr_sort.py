@@ -136,7 +136,55 @@ def cal_cam_move(x, th):
 
     return x
 
+class PedestrianMask(object):
+    def __init__(self):
+        self.max_age_bound = 20
+        self.area_mask = np.zeros((frame_width+1,2))
+        self.area_mask.fill(-1)
+        self.dx_mask = np.zeros(frame_width+1)
+        self.dx_mask.fill(-1)
 
+    def clear(self):
+        self.area_mask.fill(-1)
+        self.dx_mask.fill(-1)
+
+    def update(self, xmin, xmax, dx):
+        if xmin < 0: xmin = 0
+        if xmax > frame_width: xmax = frame_width
+
+        start = self.area_mask[xmin][0]
+        if start == -1 and xmin > 0:
+            start = self.area_mask[xmin-1][0]
+        
+        if start == -1:
+            start = xmin
+        
+        end = self.area_mask[xmax][1]
+        if end == -1 and xmax < frame_width:
+            end = self.area_mask[xmax+1][1]
+
+        if end == -1:
+            end = xmax
+        
+        self.area_mask[xmin:xmax,0].fill(start)
+        self.area_mask[xmin:xmax,1].fill(end)
+
+        self.dx_mask[xmin:xmax].fill(float(dx))
+
+    def get_escape_time(self, x, dx):
+        # print(self.area_mask[x])
+        if x > frame_width: x = frame_width
+        if x < 0: x = 0
+        area = self.area_mask[x][0] - self.area_mask[x][1]
+        if area == 0:
+            return -1
+        mask_dx = float(self.dx_mask[x])
+        dx -= mask_dx
+        if dx == 0:
+            return self.max_age_bound
+        escape_time = abs(int(area / dx))
+        if escape_time > self.max_age_bound: escape_time = self.max_age_bound
+        return escape_time
 
 class KalmanBoxTracker(object):
     """
@@ -144,7 +192,7 @@ class KalmanBoxTracker(object):
     """
     count = 0
 
-    def __init__(self, bbox):
+    def __init__(self, bbox, max_age):
         """
         Initialises a tracker using initial bounding box.
         """
@@ -169,6 +217,7 @@ class KalmanBoxTracker(object):
         self.kf.Q[4:, 4:] *= 0.01
 
         self.kf.x[:4] = convert_bbox_to_z(bbox)
+        self.dx = self.kf.x[4]
         self.time_since_update = 0
         self.id = KalmanBoxTracker.count
         KalmanBoxTracker.count += 1
@@ -176,12 +225,16 @@ class KalmanBoxTracker(object):
         self.hits = 0
         self.hit_streak = 0
         self.age = 0
+        self.is_occluded = False
+        self.default_max_age = max_age
+        self.max_age = self.default_max_age
 
     def update(self, bbox):
         """
         Updates the state vector with observed bbox.
         """
         self.time_since_update = 0
+        self.max_age = self.default_max_age
         self.history = []
         self.hits += 1
         self.hit_streak += 1
@@ -194,6 +247,7 @@ class KalmanBoxTracker(object):
         if((self.kf.x[6]+self.kf.x[2]) <= 0):
             self.kf.x[6] *= 0.0
         self.kf.predict()
+        self.dx = self.kf.x[4]
         self.age += 1
         if(self.time_since_update > 0):
             self.hit_streak = 0
@@ -206,7 +260,6 @@ class KalmanBoxTracker(object):
         Returns the current bounding box estimate.
         """
         return convert_x_to_bbox(self.kf.x)
-
 
 def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
     """
@@ -252,7 +305,6 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
 
     return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
 
-
 class Sort(object):
 
     def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
@@ -264,6 +316,7 @@ class Sort(object):
         self.iou_threshold = iou_threshold
         self.trackers = []
         self.frame_count = 0
+        self.mask = PedestrianMask()
 
     def update(self, dets=np.empty((0, 5)), odom=[0, 0, 0]):
         """
@@ -275,6 +328,7 @@ class Sort(object):
         NOTE: The number of objects returned may differ from the number of detections provided.
         """
         self.frame_count += 1
+        self.mask.clear()
         # get predicted locations from existing trackers.
         trks = np.zeros((len(self.trackers), 5))
         to_del = []
@@ -301,19 +355,45 @@ class Sort(object):
         for m in matched:
             self.trackers[m[1]].update(dets[m[0], :])
 
+            xmin = int(dets[m[0]][0])
+            xmax = int(dets[m[0]][2])
+            dx = self.trackers[m[1]].kf.x[4]
+            self.mask.update(xmin, xmax, dx)
+
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
-            trk = KalmanBoxTracker(dets[i, :])
+            trk = KalmanBoxTracker(dets[i, :], self.max_age)
             self.trackers.append(trk)
+
+            xmin = int(dets[i][0])
+            xmax = int(dets[i][2])
+            self.mask.update(xmin, xmax, 0)
+
+        for i in unmatched_trks:
+            x = int(self.trackers[i].kf.x[0])
+            dx = float(self.trackers[i].kf.x[4])
+            max_age = self.mask.get_escape_time(x, dx)
+
+            if max_age == -1:                
+                self.trackers[i].is_occluded = False
+                self.trackers[i].max_age = max_age
+            else:
+                self.trackers[i].is_occluded = True
+                self.trackers[i].max_age = self.max_age
+
         i = len(self.trackers)
         for trk in reversed(self.trackers):
             d = trk.get_state()[0]
-            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
+            if ((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)) or trk.is_occluded:
                 # +1 as MOT benchmark requires positive
                 ret.append(np.concatenate((d, [trk.id+1])).reshape(1, -1))
             i -= 1
             # remove dead tracklet
-            if(trk.time_since_update > self.max_age):
+            max_age = self.max_age
+            if trk.is_occluded:
+                max_age = trk.max_age
+
+            if(trk.time_since_update > max_age):
                 self.trackers.pop(i)
         if(len(ret) > 0):
             return (np.concatenate(ret), trks)
@@ -342,8 +422,7 @@ def read_odom(odom_fn):
                 info[img_fn] = [0, 0, 0]
                 start = False
             else:
-                info[img_fn] = [rad_to_degree(
-                    th-before_th), x-before_x, y-before_y]
+                info[img_fn] = [rad_to_degree(th-before_th), x-before_x, y-before_y]
 
             before_th = th
             before_x = x
@@ -499,31 +578,49 @@ if __name__ == '__main__':
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
-                for d in dets:
-                    d = d.astype(np.int32)
-                    det_frame = cv2.rectangle(
-                        det_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
-                    odom_frame = cv2.rectangle(
-                        odom_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
+                if display:
+                    mask = mot_tracker.mask
+                    for d in dets:
+                        d = d.astype(np.int32)
+                        det_frame = cv2.rectangle(
+                            det_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
+                        odom_frame = cv2.rectangle(
+                            odom_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
 
-                for id, pbbox in enumerate(predicts):
-                    pbbox = pbbox.astype(np.uint32)
-                    color = colours[pbbox[4] % 32, :]
-                    cv_color = color * 255
-                    cv_color = [cv_color[2], cv_color[1], cv_color[0]]
-                    # print(pbbox)
+                        i = 0
+                        while True:
+                            if i > frame_width:
+                                break
+                            xmin = int(mask.area_mask[i][0])
+                            xmax = int(mask.area_mask[i][1])
 
-                    if pbbox[0] > frame_width or pbbox[0] < 0:
-                        pbbox[0] = 0
-                    if pbbox[1] > frame_height or pbbox[1] < 0:
-                        pbbox[1] = 0
-                    if pbbox[2] > frame_width:
-                        pbbox[2] = frame_width
-                    if pbbox[3] > frame_height:
-                        pbbox[3] = frame_height 
+                            cv2.rectangle(odom_frame, (xmin, frame_height-50), (xmax, frame_height), (0, 0, 0), 2)
+                            if xmax == -1: i += 1
+                            else: i = xmax + 1
 
-                    odom_frame = cv2.rectangle(
-                        odom_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
+
+                    for id, pbbox in enumerate(predicts):
+                        pbbox = pbbox.astype(np.uint32)
+                        color = colours[pbbox[4] % 32, :]
+                        cv_color = color * 255
+                        cv_color = [cv_color[2], cv_color[1], cv_color[0]]
+                        # print(pbbox)
+
+                        if pbbox[0] < 0 or pbbox[0] > frame_width + 10:
+                            pbbox[0] = 0
+                        if pbbox[1] < 0 or pbbox[1] > frame_width + 10:
+                            pbbox[1] = 0
+                        # if pbbox[0] > frame_width:
+                        #     pbbox[0] = frame_width
+                        # if pbbox[1] > frame_height:
+                        #     pbbox[1] = frame_height
+                        if pbbox[2] > frame_width:
+                            pbbox[2] = frame_width
+                        if pbbox[3] > frame_height:
+                            pbbox[3] = frame_height 
+
+                        odom_frame = cv2.rectangle(
+                            odom_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
 
                 for d in trackers:
                     print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
