@@ -41,6 +41,7 @@ if __name__ == "__main__":
 
     for seq_dir in glob.glob(pattern):
         seq = seq_dir[pattern.find('*'):].split(os.path.sep)[0]
+        print(seq)
 
         img_dir = os.path.join(data_path, seq, 'img')
         if not os.path.exists(img_dir):
@@ -54,8 +55,8 @@ if __name__ == "__main__":
         odom_fn = os.path.join(data_path, seq, 'odom.txt')
 
         with open(odom_fn, 'r') as odom_file:
+            start_flag = True
             before_theta = 0
-            start = True
             while True:
                 line = odom_file.readline()
                 if not line:
@@ -65,9 +66,9 @@ if __name__ == "__main__":
                 img_fn = data[0]
                 theta = float(data[1])
 
-                if(start):
+                if start_flag:
                     before_theta = theta
-                    start = False
+                    start_flag = False
                 gap_theta = theta - before_theta
 
                 frame = cv2.imread(os.path.join(img_dir, img_fn))
