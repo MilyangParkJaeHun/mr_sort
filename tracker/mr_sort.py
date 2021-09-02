@@ -608,7 +608,6 @@ if __name__ == '__main__':
                         for mask in mask_list:
                             xmin = int(mask[0])
                             xmax = int(mask[1])
-                            print(mask)
                             cv2.rectangle(odom_frame, (xmin, frame_height-50), (xmax, frame_height), (0, 0, 0), 2)
 
 
