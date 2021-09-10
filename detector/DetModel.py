@@ -52,9 +52,10 @@ class OpenvinoDet(metaclass=ABCMeta):
         """
         if hasattr(self.before_frame, 'size'):
             for det in dets:
-                color = (min(det['class_id'] * 17, 255),
-                        min(det['class_id'] * 7, 255),
-                        min(det['class_id'] * 5, 255))
+                # color = (min(det['class_id'] * 17, 255),
+                #         min(det['class_id'] * 7, 255),
+                #         min(det['class_id'] * 5, 255))
+                color = (100, 100, 255)
                 det_label = self.label_map[det['class_id']] if self.label_map and len(self.label_map) >= det['class_id'] \
                             else str(det['class_id'])
 
@@ -119,7 +120,7 @@ class OpenvinoDet(metaclass=ABCMeta):
             for j in range(i + 1, len(dets)):
                 if self.intersection_over_union(dets[i], dets[j]) > iou_threshold:
                     dets[j]['confidence'] = 0
-        return tuple(det for det in dets if det['confidence'] >= prob_threshold)
+        return tuple(det for det in dets if (det['confidence'] >= prob_threshold and det['class_id'] == 0))
 
     def validation_dets(self, dets, img_height, img_width):
         for det in dets:
