@@ -6,85 +6,15 @@ import sys
 import glob
 import argparse
 import numpy as np
-from yolo import Yolo
-
-class Detector(object):
-    def __init__(self, model_path, device, prob_threshold):
-        """
-        Set key parameters for Detector
-        """
-        self.label_map = [''] * 90
-        self.label_map[0] = 'person'
-        self.prob_threshold = prob_threshold
-
-        self.model = Yolo(model_path, device, self.label_map, self.prob_threshold)
-        self.before_frame = None
-
-    def inference(self, frame):
-        """
-        Get the infrence results from Object Detection Model
-        
-        Because the Object Detection Model works asynchronously, 
-        the current result is the detection result of the previous frame
-        
-        output : [[class_id, xmin, ymin, xmax, ymax, confidence], ... ]
-        """
-        return self.model.inference(frame)
-
-    def clear(self):
-        """
-        Reload Object Detecton Model to refresh detection results buffer
-        """
-        return self.model.reload()
-
-    def draw_results(self, res):
-        """
-        Draw the infrerence results from Object Detection Model on frame
-        """
-        if hasattr(self.before_frame, 'size'):
-            return self.model.draw_objects(self.before_frame, res)
-    
-    def update_frame(self, frame):
-        """
-        Update before frame to current frame
-        """
-        self.before_frame = frame.copy()
-    
-    def get_results(self, res):
-        """
-        Get the detection result drawn over the frame
-
-        Since object detection is performed asynchronously, 
-        the current detection result is drawn in the previous frame.
-
-        output : frame
-        """
-        self.draw_results(res)
-
-        return self.before_frame
-
-    def to_dets(self, dict):
-        """
-        Convert the detection results format 
-
-        from dict format to dets format used for MOTChallengeEvalKit
-
-        dict : [class_id, xmin, ymin, xmax, ymax, confidence]
-        dets : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, x, y, z]
-        """
-        dets = {}
-        dets['bb_left']     = dict['xmin']
-        dets['bb_top']      = dict['ymin']
-        dets['bb_width']    = dict['xmax'] - dict['xmin']
-        dets['bb_height']   = dict['ymax'] - dict['ymin']
-        dets['conf']        = dict['confidence']
-
-
-        return dets
+import time
+from DetModel import OpenvinoDet
+from yolov4 import Yolov4 as Yolo
+from ssd import SsdMobilenet as Ssd
 
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='Object Detection demo')
+    parser.add_argument('--model_type', help='Type of object detection model : [ssd / yolo]', type=str, default='')
     parser.add_argument('--model_path', help='Path to object detection model weight file', type=str, default='IR/Yolo/coco')
     parser.add_argument('--img_path', help='Path to input images.', type=str, default='../mot_benchmark')
     parser.add_argument('--device', help='Device for inference', type=str, default='GPU')
@@ -100,18 +30,29 @@ if __name__ == "__main__":
     display = args.display
     phase = args.phase
 
-    detector = Detector(args.model_path, args.device, args.prob_threshold)
+    label_map = [''] * 90
+    label_map[0] = 'person'
+    if args.model_type == "yolo":
+        detector = Yolo(args.model_path, args.device, label_map, args.prob_threshold)
+    elif args.model_type == "ssd":
+        detector = Ssd(args.model_path, args.device, label_map, args.prob_threshold)
+    else:
+        print("Supports ssd or yolo as detection models. \n Choose between ssd and yolo!!!")
+        sys.exit(1)
 
     if not os.path.exists('output'):
         os.makedirs('output')
     pattern = os.path.join(args.img_path, phase, '*', 'img1')
 
+
+    total_time = 0 
+    total_frame = 0
     for img_dir in glob.glob(pattern):
         detector.clear()
 
         frame_id = 0
         seq = img_dir[pattern.find('*'):].split(os.path.sep)[0]
-        out_det_path = os.path.join('output', seq)
+        out_det_path = os.path.join(args.img_path, phase, seq, 'det')
         if not os.path.exists(out_det_path):
             os.makedirs(out_det_path)
 
@@ -120,7 +61,6 @@ if __name__ == "__main__":
             os.makedirs(out_img_dir)
 
         with open(os.path.join(out_det_path, 'det.txt'), 'w') as out_file:
-            print('output file : ', out_file)
 
             img_id_list = [i+1 for i in range(len(os.listdir(img_dir)))]
             img_id_list.append(img_id_list[-1])
@@ -132,7 +72,13 @@ if __name__ == "__main__":
                 print(img_file_path)
                 frame = cv2.imread(img_file_path, cv2.IMREAD_COLOR)
 
+                det_start_time = time.time()
                 res = detector.inference(frame)
+                det_end_time = time.time()
+
+                total_time += det_end_time - det_start_time
+                total_frame += 1
+
                 before_frame_id = frame_id - 1
                 for object_dict in res:
                     if not object_dict['class_id'] == 0:
@@ -145,12 +91,13 @@ if __name__ == "__main__":
 
                 if display:
                     out_img_path = os.path.join(out_img_dir, '%06d.jpg'%(before_frame_id))
-                    out_frame = detector.get_results(res)
+                    out_frame = detector.get_results_img(res)
 
                     if hasattr(out_frame, 'size') and frame_id > 1:
                         cv2.imwrite(out_img_path, out_frame)
 
                     detector.update_frame(frame)
+    print('fps : ', total_frame / total_time)
                     
 
 
