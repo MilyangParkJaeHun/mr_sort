@@ -1,23 +1,7 @@
-"""
-    SORT: A Simple, Online and Realtime Tracker
-    Copyright (C) 2016-2020 Alex Bewley alex@bewley.ai
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
 from __future__ import print_function
 from filterpy.kalman import EKF
 import configparser
+from filterpy.kalman.kalman_filter import predict
 
 from numpy import ma
 from kalman import KalmanFilter
@@ -37,7 +21,6 @@ import matplotlib
 from functools import cmp_to_key
 matplotlib.use('TkAgg')
 
-
 config = configparser.ConfigParser()
 np.random.seed(0)
 
@@ -45,17 +28,9 @@ fov = 113  # camera's field of view
 PI = 3.14159265
 frame_width = 640
 frame_height = 480
-min_height = 50
 
-pimg_w = 640
-pimg_h = 480
-
-pbbox_height = 100
-pbbox_width = 100
-
-min_ratio = 0.05
-max_ratio = 0.3
-
+img_w = 640
+img_h = 480
 
 def degree_to_rad(degree):
     return degree / 180 * PI
@@ -139,70 +114,6 @@ def cal_cam_move(x, th):
 
     return x
 
-def h_compare(x, y):
-    if x[0] > y[0]:
-        return 1
-    elif x[0] == y[0]:
-        if x[1] < y[1]:
-            return 1
-        else:
-            return 0
-    else:
-        return 0
-
-class PedestrianMask(object):
-    def __init__(self):
-        self.max_age_bound = 20
-        self.area_mask = []
-        self.dx_mask = []
-        self.mask_list = []
-        self.mask_count = 0
-
-    def clear(self):
-        self.area_mask.clear()
-        self.dx_mask.clear()
-        self.mask_list.clear()
-        self.mask_count = 0
-
-    def update(self):
-        sorted(self.mask_list, key=cmp_to_key(h_compare))
-
-        for mask in self.mask_list:
-            self.mask_count +=1
-            self.area_mask.append(mask[1:3])
-            self.dx_mask.append(mask[3])
-
-    def append(self, bbox, dx):
-        xmin = bbox[0]
-        xmax = bbox[2]
-        h = bbox[3] - bbox[1]
-        self.mask_list.append([h, xmin, xmax, dx])
-
-    def get_escape_time(self, bbox, dx):
-        # print(self.area_mask[x])
-        xmin = bbox[0]
-        xmax = bbox[2]
-
-        escape_time = -1
-        for i in range(self.mask_count):
-            area = self.area_mask[i]
-            mask_dx = self.dx_mask[i]
-            dx -= mask_dx
-            if (xmin <= area[1] and xmin >= area[0]) or (xmax <= area[1] and xmax >= area[0]):
-                if dx > 0:
-                    escape_time = (area[1] - xmin) / dx
-                    break
-                elif dx < 0:
-                    escape_time = (xmax - area[0]) / dx
-                    break
-                else:
-                    escape_time = self.max_age_bound
-                    break
-        if escape_time > self.max_age_bound:
-            escape_time = self.max_age_bound
-        
-        return escape_time
-
 class KalmanBoxTracker(object):
     """
     This class represents the internal state of individual tracked objects observed as bbox.
@@ -267,10 +178,10 @@ class KalmanBoxTracker(object):
         self.dx = self.kf.x[4]
         self.age += 1
         if(self.time_since_update > 0):
-            self.hit_streak = 0
+            self.hit_streak = int(self.hits / 10) - self.time_since_update + 2
         self.time_since_update += 1
         self.history.append(convert_x_to_bbox(self.kf.x))
-        return self.history[-1]
+        return self.history[-1][0]
 
     def get_state(self):
         """
@@ -322,7 +233,7 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
 
     return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
 
-class Sort(object):
+class Mrsort(object):
 
     def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
         """
@@ -333,7 +244,6 @@ class Sort(object):
         self.iou_threshold = iou_threshold
         self.trackers = []
         self.frame_count = 0
-        self.mask = PedestrianMask()
 
     def update(self, dets=np.empty((0, 5)), odom=[0, 0, 0]):
         """
@@ -345,7 +255,6 @@ class Sort(object):
         NOTE: The number of objects returned may differ from the number of detections provided.
         """
         self.frame_count += 1
-        self.mask.clear()
         # get predicted locations from existing trackers.
         trks = np.zeros((len(self.trackers), 5))
         to_del = []
@@ -357,7 +266,7 @@ class Sort(object):
             cal_cam_move(self.trackers[t].kf.x, d_th)
             # print('after : ', self.trackers[t].kf.x[0])
             # print('----------------------------------------------------')
-            pos = self.trackers[t].predict()[0]
+            pos = self.trackers[t].predict()
             trk[:] = [pos[0], pos[1], pos[2], pos[3], self.trackers[t].id+1]
             if np.any(np.isnan(pos)):
                 to_del.append(t)
@@ -372,32 +281,10 @@ class Sort(object):
         for m in matched:
             self.trackers[m[1]].update(dets[m[0], :])
 
-            dx = self.trackers[m[1]].kf.x[4]
-            self.mask.append(dets[m[0]], dx)
-
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
             trk = KalmanBoxTracker(dets[i, :], self.max_age)
             self.trackers.append(trk)
-
-            self.mask.append(dets[i], 0)
-
-        if len(unmatched_trks) > 0:
-            self.mask.update()
-
-        # print('----------------------------------------')
-        for i in unmatched_trks:
-            bbox = convert_x_to_bbox(self.trackers[i].kf.x)[0]
-            dx = float(self.trackers[i].kf.x[4])
-            max_age = self.mask.get_escape_time(bbox, dx)
-            # print(max_age)
-
-            if max_age == -1:                
-                self.trackers[i].is_occluded = False
-                self.trackers[i].max_age = max_age
-            else:
-                self.trackers[i].is_occluded = True
-                self.trackers[i].max_age = self.max_age
 
         i = len(self.trackers)
         for trk in reversed(self.trackers):
@@ -406,16 +293,13 @@ class Sort(object):
                 # +1 as MOT benchmark requires positive
                 ret.append(np.concatenate((d, [trk.id+1])).reshape(1, -1))
             i -= 1
-            # remove dead tracklet
-            max_age = self.max_age
-            if trk.is_occluded:
-                max_age = trk.max_age
 
-            if(trk.time_since_update > max_age):
+            # dynamically set the tracker's life range
+            if(trk.time_since_update > self.max_age + trk.hits/10):
                 self.trackers.pop(i)
         if(len(ret) > 0):
-            return (np.concatenate(ret), trks)
-        return (np.empty((0, 5)), trks)
+            return np.concatenate(ret)
+        return np.empty((0, 5))
 
 
 def read_odom(odom_fn):
@@ -468,10 +352,6 @@ def parse_args():
                         type=int, default=3)
     parser.add_argument("--iou_threshold",
                         help="Minimum IOU for match.", type=float, default=0.3)
-    parser.add_argument("--min_ratio",
-                        help="Minimum IOU for match.", type=float, default=0.3)
-    parser.add_argument("--max_ratio",
-                        help="Minimum IOU for match.", type=float, default=0.3)
     args = parser.parse_args()
     return args
 
@@ -481,8 +361,6 @@ if __name__ == '__main__':
     args = parse_args()
     display = args.display
     phase = args.phase
-    min_ratio = args.min_ratio
-    max_ratio = args.max_ratio
 
     data_path = args.seq_path
     output_path = args.out_path
@@ -507,6 +385,7 @@ if __name__ == '__main__':
 
     # sequnce pattern loop
     for seq_dets_fn in glob.glob(pattern):
+        KalmanBoxTracker.count = 0
 
         seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
         seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
@@ -531,9 +410,9 @@ if __name__ == '__main__':
             odom_info = read_odom(odom_fn)
             odom_mode = True
 
-        mot_tracker = Sort(max_age=args.max_age,
+        mot_tracker = Mrsort(max_age=args.max_age,
                            min_hits=args.min_hits,
-                           iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
+                           iou_threshold=args.iou_threshold)  # create instance of the MRSORT tracker
 
         if display and not os.path.exists(os.path.join(output_path, seq)):
             os.makedirs(os.path.join(output_path, seq))
@@ -550,10 +429,6 @@ if __name__ == '__main__':
                     odom = odom_info[img_fn]
                 else:
                     odom = [0, 0, 0]
-                det_frame = cv2.imread(os.path.join(
-                    data_path, phase, seq, 'img1', img_fn))
-                odom_frame = cv2.imread(os.path.join(
-                    data_path, phase, seq, 'img1', img_fn))
 
                 dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
                 # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
@@ -567,72 +442,28 @@ if __name__ == '__main__':
                     ax1.imshow(im)
                     plt.title(seq + ' Tracked Targets')
 
-                    odom_frame = cv2.line(odom_frame, (int(
-                        pimg_w/2), int(pimg_h*0.9)), (int(pimg_w/2), int(pimg_h*0.9)), (255, 0, 0), 5)
                     arrow_end = (
-                        int(pimg_w/2 - 10*(odom[0]/180)*pimg_w/2), int(pimg_h*0.9))
+                        int(img_w/2 - 10*(odom[0]/180)*img_w/2), int(img_h*0.98))
                     if arrow_end[0] < 0:
                         arrow_end = list(arrow_end)
                         arrow_end[0] = 1
                         arrow_end = tuple(arrow_end)
-                    if arrow_end[0] > pimg_w:
+                    if arrow_end[0] > img_w:
                         arrow_end = list(arrow_end)
-                        arrow_end[0] = pimg_w
+                        arrow_end[0] = img_w
                         arrow_end = tuple(arrow_end)
-                    arrow_color = (255, 0, 0)
-                    if arrow_end[0] > pimg_w/2:
-                        arrow_color = (0, 255, 0)
+                    arrow_color = (1, 0, 0)
+                    if arrow_end[0] > img_w/2:
+                        arrow_color = (1, 0, 0)
                     else:
-                        arrow_color = (0, 0, 255)
+                        arrow_color = (0, 1, 0)
 
-                    if odom_mode:
-                        odom_frame = cv2.arrowedLine(
-                            odom_frame, (int(pimg_w/2), int(pimg_h*0.9)), arrow_end, arrow_color, 5)
-                        odom_frame = cv2.putText(odom_frame, 'degree : %.2f' % (odom[0]), (30, int(
-                            pimg_h*0.8)), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                    ax1.annotate("", xy=arrow_end, xytext=(int(img_w/2), int(img_h*0.98)),  arrowprops=dict(arrowstyle="->", color=arrow_color), size=20)
 
                 start_time = time.time()
-                trackers, predicts = mot_tracker.update(dets, odom)
+                trackers = mot_tracker.update(dets, odom)
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
-
-                if display:
-                    mask_list = mot_tracker.mask.area_mask
-                    for d in dets:
-                        d = d.astype(np.int32)
-                        det_frame = cv2.rectangle(
-                            det_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
-                        odom_frame = cv2.rectangle(
-                            odom_frame, (d[0], d[1]), (d[2], d[3]), (0, 0, 0), 2)
-
-                        for mask in mask_list:
-                            xmin = int(mask[0])
-                            xmax = int(mask[1])
-                            cv2.rectangle(odom_frame, (xmin, frame_height-50), (xmax, frame_height), (0, 0, 0), 2)
-
-
-                    for id, pbbox in enumerate(predicts):
-                        pbbox = pbbox.astype(np.uint32)
-                        color = colours[pbbox[4] % 32, :]
-                        cv_color = color * 255
-                        cv_color = [cv_color[2], cv_color[1], cv_color[0]]
-                        # print(pbbox)
-
-                        if pbbox[0] < 0 or pbbox[0] > frame_width + 10:
-                            pbbox[0] = 0
-                        if pbbox[1] < 0 or pbbox[1] > frame_width + 10:
-                            pbbox[1] = 0
-                        # if pbbox[0] > frame_width:
-                        #     pbbox[0] = frame_width
-                        # if pbbox[1] > frame_height:
-                        #     pbbox[1] = frame_height
-                        if pbbox[2] > frame_width:
-                            pbbox[2] = frame_width
-                        if pbbox[3] > frame_height:
-                            pbbox[3] = frame_height 
-
-                        odom_frame = cv2.rectangle(
-                            odom_frame, (pbbox[0], pbbox[1]), (pbbox[2], pbbox[3]), cv_color, 2)
 
                 for d in trackers:
                     print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
@@ -641,23 +472,13 @@ if __name__ == '__main__':
                         d = d.astype(np.int32)
                         ax1.add_patch(patches.Rectangle(
                             (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
-                        # odom_frame = draw_polar_coordinate(
-                        # odom_frame, d, colours[d[4] % 32, :], pimg_w, pimg_h)
 
                 if(display):
                     fig.canvas.flush_events()
                     plt.draw()
                     plt.savefig(os.path.join(
                         output_path, seq, '%06d.jpg' % (frame)))
-
                     ax1.cla()
-
-                    cv2.imshow('odom', odom_frame)
-                    cv2.imshow('det', det_frame)
-                    cv2.imwrite(os.path.join(output_path, seq,
-                                'odom_%06d.jpg' % (frame)), odom_frame)
-                    cv2.imwrite(os.path.join(output_path, seq,
-                                'det_%06d.jpg' % (frame)), det_frame)
 
                     key = cv2.waitKey(1)
                     if key == ord('q'):
