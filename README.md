@@ -63,7 +63,7 @@ mot_tracker = Mrsort()
 ...
 
 # get odometry
-# odometry is [th, x, y] format array
+# odometry is [th(degree), x, y] format array
 ...
 
 # update MR_SORT
