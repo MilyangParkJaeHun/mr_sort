@@ -1,0 +1,3 @@
+[submodule "openvino_detector"]
+	path = openvino_detector
+	url = https://github.com/MilyangParkJaeHun/openvino_detector.git
