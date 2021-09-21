@@ -239,7 +239,7 @@ class Sort(object):
     for t in reversed(to_del):
       self.trackers.pop(t)
       
-    print('dets : ', dets.shape)
+    # print('dets : ', dets.shape)
     # print('trks : ', trks.shape)
     matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold)
 
@@ -263,7 +263,7 @@ class Sort(object):
     if(len(ret)>0):
       return np.concatenate(ret)
     return np.empty((0,5))
-7
+
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='SORT demo')
@@ -322,7 +322,7 @@ if __name__ == '__main__':
           fn = os.path.join(data_path, phase, seq, 'img1', '%06d.jpg'%(frame))
           im =io.imread(fn)
           ax1.imshow(im)
-          plt.title(seq + ' Tracked Targets')
+          plt.title(seq + ' on SORT')
 
         start_time = time.time()
         trackers = mot_tracker.update(dets)

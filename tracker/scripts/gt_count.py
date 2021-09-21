@@ -1,10 +1,6 @@
 """
-    gt_visualizer.py
-    Author: Park Jaehun
-
-    Purpose
-        Visualize MOT GT data using OpenCV
-        MOT GT data format  : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
+Visualize MOT GT data using OpenCV
+MOT GT data format  : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
 """
 import os
 
@@ -21,7 +17,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Visualize GT data")
     parser.add_argument("--seq_path", help="Path to detections.", type=str, default='/home/openvino/dev/mr_sort/tracker/data')
     parser.add_argument("--phase", help="Subdirectory in seq_path.", type=str, default='train')
-    parser.add_argument("--output", help="Path to results image.", type=str, default='gt_img')
 
     args = parser.parse_args()
     return args
@@ -66,21 +61,15 @@ if __name__ == "__main__":
     args = parse_args()
     seq_path = args.seq_path
     phase = args.phase
-    output = args.output
 
     pattern = os.path.join(seq_path, phase, '*')
     print(pattern)
     for seq_dir in glob.glob(pattern):
         seq = seq_dir[pattern.find('*'):].split(os.path.sep)[0]
-        print(seq)
 
         gt_fn = os.path.join(seq_dir, 'gt', 'gt.txt')
         if not os.path.exists(gt_fn):
             print("Can't find gt file...")
-
-        output_path = os.path.join(output, seq)
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
 
         bbox_list = {}
         with open(gt_fn, 'r') as in_file:
@@ -95,10 +84,11 @@ if __name__ == "__main__":
                 else:
                     bbox_list[data[0]].append(data[1:])
 
+            person_count = 0
             for img_id in bbox_list.keys():
                 img_fn = '%.6d.jpg'%(int(img_id))
                 frame = cv2.imread(os.path.join(seq_dir, 'img1', img_fn))
-                print(os.path.join(seq_dir, 'img1', img_fn))
+                # print(os.path.join(seq_dir, 'img1', img_fn))
 
                 for bbox in bbox_list[img_id]:
                     identity    = int(bbox[0])
@@ -110,8 +100,9 @@ if __name__ == "__main__":
                     class_id    = int(bbox[6])
                     visibility  = float(bbox[7])
 
-                    frame = cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color_map[identity], 3)
-                    frame = cv2.putText(frame, 'id : %d'%(identity), (xmin, ymin), font, 0.5, green, 2)
-                    frame = cv2.putText(frame, '%.2f'%(visibility), (xmin, ymin+20), font, 0.5, red, 1)
-                    frmae = cv2.putText(frame, 'class : %d'%(class_id), (xmin, ymin+40), font, 0.5, blue, 2)
-                cv2.imwrite(os.path.join(output_path, img_fn), frame)
+                    if visibility < 0.5:
+                        continue
+                    person_count += 1
+            print(gt_fn)
+            print(person_count)
+            print('-----------------------------------------------')

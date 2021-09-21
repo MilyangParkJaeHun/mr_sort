@@ -1,29 +1,34 @@
-from __future__ import print_function
-from filterpy.kalman import EKF
-import configparser
-from filterpy.kalman.kalman_filter import predict
+"""
+    mr_sort.py
+    Author: Park Jaehun
 
-from numpy import ma
-from kalman import KalmanFilter
-import argparse
-import time
-import glob
-from skimage import io
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
+    MR_SORT : A Simple, Online and Realtime Tracker for Mobile Robot
+    Purpose
+        Multiple object tracking suitable for mobile robots using the two methods below
+        1. Calibration camera rotation using wheel encoder based odometry information
+        2. Dynamically set the tracker's life period
+"""
+
+from __future__ import print_function
 
 import os
+import time
+import glob
 import cv2
-import sys
-import math
 import numpy as np
 import matplotlib
-from functools import cmp_to_key
 matplotlib.use('TkAgg')
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+from skimage import io
 
-config = configparser.ConfigParser()
+import configparser
+import argparse
+from kalman import KalmanFilter
+
 np.random.seed(0)
 
+config = configparser.ConfigParser()
 fov = 113  # camera's field of view
 PI = 3.14159265
 frame_width = 640
@@ -35,10 +40,8 @@ img_h = 480
 def degree_to_rad(degree):
     return degree / 180 * PI
 
-
 def rad_to_degree(rad):
     return rad / PI * 180
-
 
 def linear_assignment(cost_matrix):
     try:
@@ -50,10 +53,9 @@ def linear_assignment(cost_matrix):
         x, y = linear_sum_assignment(cost_matrix)
         return np.array(list(zip(x, y)))
 
-
 def iou_batch(bb_test, bb_gt):
     """
-    From SORT: Computes IOU between two bboxes in the form [x1,y1,x2,y2]
+    Computes IOU between two bboxes in the form [x1,y1,x2,y2]
     """
     bb_gt = np.expand_dims(bb_gt, 0)
     bb_test = np.expand_dims(bb_test, 1)
@@ -70,7 +72,6 @@ def iou_batch(bb_test, bb_gt):
               + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
     return(o)
 
-
 def convert_bbox_to_z(bbox):
     """
     Takes a bounding box in the form [x1,y1,x2,y2] and returns z in the form
@@ -85,7 +86,6 @@ def convert_bbox_to_z(bbox):
     r = w / float(h)
     return np.array([x, y, s, r]).reshape((4, 1))
 
-
 def convert_x_to_bbox(x, score=None):
     """
     Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
@@ -97,7 +97,6 @@ def convert_x_to_bbox(x, score=None):
         return np.array([x[0]-w/2., x[1]-h/2., x[0]+w/2., x[1]+h/2.]).reshape((1, 4))
     else:
         return np.array([x[0]-w/2., x[1]-h/2., x[0]+w/2., x[1]+h/2., score]).reshape((1, 5))
-
 
 def convert_x_to_th(x):
     global frame_width, fov
@@ -234,7 +233,6 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
     return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
 
 class Mrsort(object):
-
     def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
         """
         Sets key parameters for SORT
@@ -249,6 +247,7 @@ class Mrsort(object):
         """
         Params:
           dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
+          odom - array of odometry info in the format [th, x, y]
         Requires: this method must be called once for each frame even with empty detections (use np.empty((0, 5)) for frames without detections).
         Returns the a similar array, where the last column is the object ID.
 
@@ -260,12 +259,9 @@ class Mrsort(object):
         to_del = []
         ret = []
         for t, trk in enumerate(trks):
-            # pos format : pbbox
             d_th = odom[0]
-            # print('before : ', self.trackers[t].kf.x[0])
             cal_cam_move(self.trackers[t].kf.x, d_th)
-            # print('after : ', self.trackers[t].kf.x[0])
-            # print('----------------------------------------------------')
+
             pos = self.trackers[t].predict()
             trk[:] = [pos[0], pos[1], pos[2], pos[3], self.trackers[t].id+1]
             if np.any(np.isnan(pos)):
@@ -294,13 +290,12 @@ class Mrsort(object):
                 ret.append(np.concatenate((d, [trk.id+1])).reshape(1, -1))
             i -= 1
 
-            # dynamically set the tracker's life range
+            # dynamically set the tracker's life period
             if(trk.time_since_update > self.max_age + trk.hits/10):
                 self.trackers.pop(i)
         if(len(ret) > 0):
             return np.concatenate(ret)
         return np.empty((0, 5))
-
 
 def read_odom(odom_fn):
     before_th = 0
@@ -331,7 +326,6 @@ def read_odom(odom_fn):
             before_y = y
 
     return info
-
 
 def parse_args():
     """Parse input arguments."""
@@ -440,7 +434,7 @@ if __name__ == '__main__':
                                       'img1', '%06d.jpg' % (frame))
                     im = io.imread(fn)
                     ax1.imshow(im)
-                    plt.title(seq + ' Tracked Targets')
+                    plt.title(seq + ' on MR_SORT')
 
                     arrow_end = (
                         int(img_w/2 - 10*(odom[0]/180)*img_w/2), int(img_h*0.98))

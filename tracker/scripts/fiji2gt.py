@@ -1,7 +1,11 @@
 """
-Generate MOT GT data from labeling data collected by the Fiji tool
-Fiji data format    : [id visibility 0.0 0 0.0 xmim ymin xmax ymax 0.0 0.0 0.0 0.0 0.0 0.0 0.0]
-MOT GT data format  : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
+    fiji2gt.py
+    Author: Park Jaehun
+
+    Purpose
+        Generate MOT GT data from labeling data collected by the Fiji tool
+        Fiji data format    : [id visibility 0.0 0 0.0 xmim ymin xmax ymax 0.0 0.0 0.0 0.0 0.0 0.0 0.0]
+        MOT GT data format  : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
 """
 import os
 import csv

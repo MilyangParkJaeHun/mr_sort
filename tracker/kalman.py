@@ -1,3 +1,9 @@
+"""
+    kalman.py
+    Author: Park Jaehun
+
+    This module is the parts from filterpy.kalman.KalmanFilter
+"""
 from __future__ import absolute_import, division
 
 from copy import deepcopy

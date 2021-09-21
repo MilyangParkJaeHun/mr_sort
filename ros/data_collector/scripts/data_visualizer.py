@@ -1,3 +1,11 @@
+"""
+    data_visualizer.py
+    Author: Park Jaehun
+
+    Purpose
+        Visualize saved odometry information and camera frames 
+        to check if they are saved properly.
+"""
 #!/usr/bin/env python3
 
 import os

@@ -1,7 +1,11 @@
 """
-Generate MOT GT data from labeling data collected by the Yolo_mark tool
-Yolo mark data format : [obj_id, x_center, y_center, width, height]
-MOT GT data format    : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
+    yolo2gt.py
+    Author: Park Jaehun
+
+    Purpose
+        Generate MOT GT data from labeling data collected by the Yolo_mark tool
+        Yolo mark data format : [obj_id, x_center, y_center, width, height]
+        MOT GT data format    : [frame, id, bb_left, bb_top, bb_width, bb_height, conf, class, visibility]
 """
 import os
 import csv

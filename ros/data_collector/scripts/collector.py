@@ -1,3 +1,11 @@
+"""
+    collector.py
+    Author: Park Jaehun
+
+    Purpose
+        Synchronize and collect odometry information and camera frames.
+"""
+
 #!/usr/bin/env python3
 import rospy
 import rospkg

@@ -1,3 +1,10 @@
+/**
+ * @file odometry.cpp
+ * @author Park JaeHun
+ * @brief Calculate and publish odometry information based on wheel encoder.
+ * @date 2021-09-21
+ */
+ 
 #include <ros/ros.h>
 
 #include <stdlib.h>
