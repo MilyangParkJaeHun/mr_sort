@@ -10,7 +10,7 @@ by Park JaeHun
 ## Introduction
 Multiple object tracking suitable for mobile robots using the two methods below.
 1. Calibration camera rotation using wheel encoder based odometry information
-2. Dynamically set the tracker's life period
+2. Dynamically set the tracker's life period : If tracker have been tracking for a long time, keep it alive longer.
 
 ## Environments
 - Ubuntu 20.04
