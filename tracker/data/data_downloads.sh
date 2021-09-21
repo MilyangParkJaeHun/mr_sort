@@ -1,4 +1,6 @@
 #!/bin/bash
+# Downloads PxRx sequences data
+
 OUT=train
 wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=1C7TBgL2aEhJ-iiesBLeoB4LGRM09kLCz' -O PmRm.tar.xz
 wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=1--0TgmvhNYm10-4VZGsAofrOjG6kvLW3' -O PmRm2.tar.xz
