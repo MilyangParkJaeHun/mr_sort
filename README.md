@@ -19,6 +19,14 @@ Multiple object tracking suitable for mobile robots using the two methods below.
 - OpenCV 4.5.2-openvino
 - Numpy 1.17.3
 
+## Install
+```
+$ git clone https://github.com/MilyangParkJaeHun/mr_sort.git
+$ cd mr_sort
+$ git submodule init
+$ git submodule update
+```
+
 ## Demo Run
 1. Downloads PxRx sequence dataset
 ```
@@ -31,9 +39,20 @@ $ python3 mr_sort.py --seq_path=data --display
 ```
 
 ## Using different detection model quantized by [OpenVINO](https://docs.openvinotoolkit.org/latest/openvino_docs_MO_DG_Deep_Learning_Model_Optimizer_DevGuide.html)
+- A example of using SSDLite-MobileNet model
+  ```
+  $ cd /path/to/mr_sort/openvino_detector/IR/Ssd
+  $ source model_downloads.sh
+  $ cd /path/to/mr_sort/openvino_detector
+  $ python3 mot_detector.py --model_type=ssd \
+                            --model_path=IR/Ssd/ssdlite_coco \
+                            --img_path=../tracker/data \
+                            --device=CPU --display
+  ```
+For more information, see [here](https://github.com/MilyangParkJaeHun/openvino_detector)
 
 ## Using in your own project
-Below is the gist of how to use openvino_detector. See the ['main'](https://github.com/MilyangParkJaeHun/mr_sort/blob/fd0adc0b6b2ad8c55c98e6d8ab20570c99791093/tracker/mr_sort.py#L353) section of [mr_sort.py](https://github.com/MilyangParkJaeHun/mr_sort/blob/fd0adc0b6b2ad8c55c98e6d8ab20570c99791093/tracker/mr_sort.py) for a complete example.
+Below is the gist of how to use mr_sort. See the ['main'](https://github.com/MilyangParkJaeHun/mr_sort/blob/fd0adc0b6b2ad8c55c98e6d8ab20570c99791093/tracker/mr_sort.py#L353) section of [mr_sort.py](https://github.com/MilyangParkJaeHun/mr_sort/blob/fd0adc0b6b2ad8c55c98e6d8ab20570c99791093/tracker/mr_sort.py) for a complete example.
 ```
 from mr_sort import *
 
@@ -47,10 +66,12 @@ mot_tracker = Mrsort()
 # odometry is [th, x, y] format array
 ...
 
-# update SORT
+# update MR_SORT
 track_bbs_ids = mot_tracker.update(detections, odometry)
 
 # track_bbs_ids is a np array where each row contains a valid bounding box and track_id (last column)
 ...
 
 ```
+## Reference
+SORT : https://github.com/abewley/sort
