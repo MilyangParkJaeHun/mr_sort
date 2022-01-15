@@ -57,7 +57,7 @@ Below is the gist of how to use mr_sort. See the ['main'](https://github.com/Mil
 from mr_sort import *
 
 #create instance of MR_SORT
-mot_tracker = Mrsort() 
+mot_tracker = MrSort() 
 
 # get detections
 ...
