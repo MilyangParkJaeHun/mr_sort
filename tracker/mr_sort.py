@@ -160,7 +160,7 @@ class MrSort(object):
 
     def update(self, dets, odom=[0,0,0]):
         def notValidPred(scale, bbox):
-            return scale <= 0 or np.any(np.isnan(bbox))
+            return scale <= 0 or np.any(np.isnan(bbox)) or np.any(bbox < 0)
 
         preds = []
         error_preds = []
